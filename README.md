@@ -188,10 +188,12 @@ trying to keep out. Genuine false positives (a vendor product GUID, say) go in
 
 ## Not yet done
 
-- No `LICENSE` file — add whichever your organisation requires before treating
-  this as publicly reusable.
 - Only Visual Studio and desktop shortcuts are implemented. Other image steps
   (runtimes, agents, registry policy) would follow the same guest-script +
   driver + tests pattern.
 - Visual Studio's own auto-update is left at its default. Freezing it on a golden
   image is a reasonable follow-up, deliberately not guessed at here.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Princeton University.

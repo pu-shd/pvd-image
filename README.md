@@ -162,8 +162,15 @@ and OOMs under emulation on Apple silicon.
    For the same reason, prefer starting and stopping the VM there;
    `deploy.sh --start` exists for when that is inconvenient.
 4. **`./teardown.sh --deallocate`** to remove the run-command resource and stop
-   compute billing. The deallocate is the half that saves money — see
-   [docs/cost-and-cleanup.md](docs/cost-and-cleanup.md).
+   compute billing. The deallocate is the half that saves money; `./teardown.sh`
+   alone clears the resource and leaves power state untouched.
+
+Run-command resources survive stopping, deallocating and capturing — they are
+child resources of the VM, not disk content, so cleanup is a separate step from
+shutting the VM down. Sealing an image does **not** remove them. What *is* baked
+into the image is anything the guest script wrote to disk, including the staged
+script itself, so never pass a secret via `--parameters`. See
+[docs/cost-and-cleanup.md](docs/cost-and-cleanup.md).
 
 ## Identifiers and secrets
 

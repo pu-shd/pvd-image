@@ -13,6 +13,16 @@ money.
 `teardown.sh` never deletes the VM, its disks, or the image. Deallocated is the
 normal resting state for an image VM between sessions.
 
+The two halves are independent on purpose:
+
+| Command | Run-command resource | Power state |
+|---|---|---|
+| `./teardown.sh` | deleted | **untouched** |
+| `./teardown.sh --deallocate` | deleted | deallocated |
+
+So you can clear the resource while leaving the VM up for more work, which is
+the usual case mid-build.
+
 ## What a leftover run-command costs
 
 Nothing. There is no billing meter for
@@ -70,6 +80,66 @@ existence at all.
 These are list prices. Any EA, CSP or academic agreement will differ, so treat
 them as an order of magnitude for "did I leave it on?" rather than a budget.
 
+## What survives a stop, a deallocate, and an image capture
+
+Run commands are **child resources of the VM**
+(`Microsoft.Compute/virtualMachines/runCommands/<name>`), not disk content. That
+has a few consequences worth knowing before you seal an image:
+
+- They **survive** stopping and deallocating the VM. A deallocated VM still lists
+  its run commands, and they run again when it is next started.
+- They are **not carried into a captured image.** An image is made from the OS
+  disk; ARM child resources of the source VM are not part of it. A VM created
+  from the image starts with no run commands.
+- They are deleted only when you delete them, or when the VM itself is deleted.
+
+**But two things the run command touched *are* baked into the image**, because
+they live on the OS disk:
+
+1. **Anything your guest script wrote.** The scripts here log to
+   `C:\ProgramData\avd-image-setup\*.log`, so those logs ship inside the image.
+   They contain paths, versions and exit codes — no credentials — but they are
+   there, and they are worth knowing about if you are handing the image to
+   someone else.
+2. **The staged script itself.** The run-command handler writes the script to
+   `C:\Packages\Plugins\Microsoft.CPlat.Core.RunCommandHandlerWindows\<version>\Downloads\Script_<name>_0.ps1`
+   before executing it. Whether the handler removes it after a successful run has
+   not been verified here, so assume it may persist.
+
+The practical rule: **never pass a secret in `--parameters`.** Those values are
+substituted into the staged script on the guest's disk and echoed back in the
+resource's `source` property. Azure provides `--protected-parameters` for exactly
+this — those values are encrypted and are not logged:
+
+```zsh
+az vm run-command create ... \
+  --parameters "ExpectedVersion=18.10.0" \
+  --protected-parameters "SomeSecret=..."
+```
+
+None of the tooling here passes a secret by either route; it relies on `az login`
+and on run-command executing as SYSTEM.
+
+## After "set as image" / sysprep
+
+Capturing an image generalises the source VM. Check with:
+
+```zsh
+az image show -g <rg> -n <image-name> --query "storageProfile.osDisk.osState" -o tsv
+# Generalized
+```
+
+A generalised VM is **spent**. Do not start it again and dispatch more run
+commands at it — it has been sysprepped and will go through OOBE rather than
+coming back as the machine you customised. To make further changes, create a new
+VM from the captured image (which is what Nerdio's image-editing workflow does
+for you), customise that, and re-capture.
+
+Note also that capturing creates a **second** billable artefact: the image itself,
+alongside the source VM's OS disk if you keep the VM. A 128 GiB image is single
+digits of dollars per month, but it accumulates if every rebuild leaves one
+behind. Old images are worth pruning once a host pool is running on a newer one.
+
 ## Reusing a run-command resource
 
 You can, and `az vm run-command update` re-executes the new script against the
@@ -112,8 +182,8 @@ There are two flavours of run command, and the difference matters here:
 After sealing an image:
 
 ```zsh
+./teardown.sh --deallocate                                              # or ./teardown.sh alone
 az vm run-command list -g <rg> --vm-name <vm> --query "[].name" -o tsv   # expect empty
-./teardown.sh --deallocate
 az vm get-instance-view -g <rg> -n <vm> \
   --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus|[0]" -o tsv
 ```

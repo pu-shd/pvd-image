@@ -1,0 +1,6 @@
+# Keep local identifiers and run artefacts out of the test image.
+config.env
+config.env.bak
+logs/
+test-results/
+.git/

@@ -1,0 +1,26 @@
+name: tests
+
+# The suite needs no Azure subscription, no credentials and no Windows host:
+# the Azure CLI is mocked and the guest scripts are exercised with Pester.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build -t pvd-image-tests .
+
+      - name: Run all suites
+        run: |
+          mkdir -p test-results
+          docker run --rm -v "$PWD/test-results:/work/test-results" pvd-image-tests
+
+      - name: Assert no identifiers were committed
+        run: ./tools/scrub-check.sh

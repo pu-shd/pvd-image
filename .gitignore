@@ -1,0 +1,7 @@
+# Your own identifiers - copy config.env.example to config.env and edit it.
+config.env
+config.env.bak
+
+# Run artefacts.
+logs/
+test-results/

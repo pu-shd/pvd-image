@@ -1,0 +1,13 @@
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: avd-vs-image-tests:latest
+    container_name: avd-vs-image-tests
+    # Results land on the host so CI can pick up the JUnit XML.
+    volumes:
+      - ./test-results:/work/test-results
+    environment:
+      # Keeps the mocked Azure CLI honest: any unmocked call fails loudly.
+      MOCK_SCENARIO: success

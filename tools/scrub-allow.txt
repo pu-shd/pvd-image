@@ -1,0 +1,6 @@
+# Exact strings allowed past tools/scrub-check.sh, one per line.
+# Each needs a comment saying why it is not an environment identifier.
+
+# Microsoft Office product code, part of the Click-to-Run icon resource path
+# quoted in docs/shortcuts.md. A fixed vendor GUID, identical everywhere.
+{90160000-000F-0000-1000-0000000FF1CE}

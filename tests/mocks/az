@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Mock Azure CLI. Behaviour is driven by $MOCK_SCENARIO so the driver's decision
+# logic can be tested without touching Azure. Every invocation is appended to
+# $MOCK_CALL_LOG so tests can assert on what the driver actually did.
+
+set -uo pipefail
+
+[[ -n "${MOCK_CALL_LOG:-}" ]] && printf '%s\n' "$*" >> "$MOCK_CALL_LOG"
+
+args="$*"
+scenario="${MOCK_SCENARIO:-success}"
+
+# The guest's stdout for the current scenario, as the guest would emit it.
+guest_output() {
+  case "$scenario" in
+    silent)    printf '' ;;
+    shortcuts) printf 'AVD_SHORTCUT_OK=Excel\nAVD_STATUS=success\nAVD_SHORTCUT_COUNT=%s\nAVD_REASON=create completed\n' "${MOCK_SHORTCUT_COUNT:-1}" ;;
+    guestfail) printf 'AVD_STATUS=failed\nAVD_VERSION=\nAVD_BUILD=\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installer failed with exit code 1618\n' ;;
+    drift)     printf 'AVD_STATUS=success\nAVD_VERSION=18.11.0\nAVD_BUILD=18.11.12300.1\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installed and verified\n' ;;
+    noversion) printf 'AVD_STATUS=success\nAVD_VERSION=\nAVD_BUILD=\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installed and verified\n' ;;
+    reboot)    printf 'AVD_STATUS=success\nAVD_VERSION=18.10.0\nAVD_BUILD=18.10.12201.205\nAVD_REBOOT_REQUIRED=true\nAVD_REASON=installed and verified\n' ;;
+    *)         printf 'AVD_STATUS=success\nAVD_VERSION=18.10.0\nAVD_BUILD=18.10.12201.205\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installed and verified\n' ;;
+  esac
+}
+
+guest_error() {
+  case "$scenario" in
+    silent) printf 'ParserError: Unexpected token' ;;
+    *)      printf '' ;;
+  esac
+}
+
+# The full resource JSON. Note `source.script`: the real API echoes the script
+# we uploaded, and that text contains literal marker strings. A driver that
+# greps this blob instead of instanceView.output will match its own source and
+# think the guest reported something. That trap is deliberate.
+emit_full_json() {
+  local out
+  out="$(guest_output | sed ':a;N;$!ba;s/\n/\\n/g')"
+  cat <<JSON
+{
+  "name": "install-vs-cpp",
+  "source": {
+    "script": "function Write-Result {\n  Out-Line \"AVD_STATUS=\$Status\"\n  Out-Line \"AVD_VERSION=\$Version\"\n  Out-Line \"AVD_REBOOT_REQUIRED=false\"\n  Out-Line \"AVD_REASON=\$Reason\"\n}\n"
+  },
+  "instanceView": {
+    "executionState": "${MOCK_EXEC_STATE:-Succeeded}",
+    "exitCode": 0,
+    "output": "${out}",
+    "error": "$(guest_error)"
+  }
+}
+JSON
+}
+
+case "$args" in
+  "account show"*)
+    echo '{"id":"mock-sub","user":{"name":"tester@example.invalid"}}'
+    ;;
+
+  "vm get-instance-view"*)
+    if [[ "$args" == *vmAgent* ]]; then
+      echo "Ready"
+    elif [[ "$args" == *PowerState* ]]; then
+      case "$scenario" in
+        deallocated|start_then_run) echo "${MOCK_POWER_STATE:-VM deallocated}" ;;
+        *)                          echo "VM running" ;;
+      esac
+    else
+      echo '{}'
+    fi
+    ;;
+
+  "vm start"*)
+    export MOCK_POWER_STATE="VM running"
+    ;;
+
+  "vm deallocate"*) ;;
+
+  "vm run-command show"*)
+    if [[ "$args" == *--instance-view* ]]; then
+      if [[ "$args" == *executionState* ]]; then
+        echo "${MOCK_EXEC_STATE:-Succeeded}"
+      elif [[ "$args" == *instanceView.output* ]]; then
+        guest_output
+      elif [[ "$args" == *instanceView.error* ]]; then
+        guest_error
+      else
+        emit_full_json
+      fi
+    else
+      # Existence probe for a stale resource.
+      [[ "${MOCK_STALE_RUNCMD:-0}" == "1" ]] && exit 0
+      exit 1
+    fi
+    ;;
+
+  "vm run-command create"*) ;;
+  "vm run-command delete"*) ;;
+
+  *)
+    echo "mock az: unhandled invocation: $args" >&2
+    exit 64
+    ;;
+esac
+exit 0

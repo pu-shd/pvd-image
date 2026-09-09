@@ -129,9 +129,9 @@ docker-compose build
 docker-compose run --rm tests
 ```
 
-**170 tests** across four suites, requiring no Azure subscription and no Windows
+**188 tests** across five suites, requiring no Azure subscription and no Windows
 host: 102 Pester tests over the guest decision logic (external edges mocked),
-plus 68 zsh tests driving each shell entry point against a mock `az` in
+plus 86 zsh tests driving each shell entry point against a mock `az` in
 `tests/mocks/az`.
 The runner fails if any suite fails, and also if a suite reports zero tests or no
 summary line — an empty run must not look green.
@@ -157,20 +157,24 @@ and OOMs under emulation on Apple silicon.
    C++ project compiles. `run-command` can verify files and exit codes, not that
    a GUI is usable.
 2. **Reboot** if a run reported `AVD_REBOOT_REQUIRED=true`, before sealing.
-3. **Seal and capture in your image-management tool** (Nerdio, or whatever owns
+3. **`./teardown.sh`** — *while the VM is still running.* Deleting a run command
+   is an extension operation, and Azure refuses those on a stopped VM
+   (`Cannot modify extensions in the VM when the VM is not running`). Once you
+   seal or shut down, the resource is stranded until the VM runs again or is
+   deleted. Use `./teardown.sh --deallocate` to remove it and stop compute
+   billing in one go, in that order.
+4. **Seal and capture in your image-management tool** (Nerdio, or whatever owns
    the image lifecycle) rather than with raw `az`, so its state stays consistent.
    For the same reason, prefer starting and stopping the VM there;
    `deploy.sh --start` exists for when that is inconvenient.
-4. **`./teardown.sh --deallocate`** to remove the run-command resource and stop
-   compute billing. The deallocate is the half that saves money; `./teardown.sh`
-   alone clears the resource and leaves power state untouched.
 
-Run-command resources survive stopping, deallocating and capturing — they are
-child resources of the VM, not disk content, so cleanup is a separate step from
-shutting the VM down. Sealing an image does **not** remove them. What *is* baked
-into the image is anything the guest script wrote to disk, including the staged
-script itself, so never pass a secret via `--parameters`. See
-[docs/cost-and-cleanup.md](docs/cost-and-cleanup.md).
+Run-command resources are child resources of the VM, not disk content: they
+survive stopping and deallocating, and are **not** carried into a captured image.
+A stranded one is harmless — there is no meter for them — but it counts against
+the limit of 25 per VM, and it is not worth starting a generalised VM to tidy up.
+What *is* baked into the image is anything the guest script wrote to disk,
+including the staged script itself, so never pass a secret via `--parameters`.
+See [docs/cost-and-cleanup.md](docs/cost-and-cleanup.md).
 
 ## Identifiers and secrets
 

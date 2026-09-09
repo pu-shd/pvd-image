@@ -18,10 +18,23 @@ The two halves are independent on purpose:
 | Command | Run-command resource | Power state |
 |---|---|---|
 | `./teardown.sh` | deleted | **untouched** |
-| `./teardown.sh --deallocate` | deleted | deallocated |
+| `./teardown.sh --deallocate` | deleted, **then** deallocated | deallocated |
 
 So you can clear the resource while leaving the VM up for more work, which is
 the usual case mid-build.
+
+> **Order matters, and it is not obvious.** Deleting a managed run command is an
+> *extension* operation, and Azure refuses those on a stopped VM:
+>
+> ```
+> (OperationNotAllowed) Cannot modify extensions in the VM when the VM is not running.
+> ```
+>
+> So the resource must be removed **while the VM is still running**.
+> `./teardown.sh --deallocate` does them in that order deliberately. If you shut
+> the VM down first — including via a "set as image" capture — the run command is
+> stranded until the VM runs again or is deleted. `teardown.sh` detects this and
+> explains rather than failing on the raw Azure error.
 
 ## What a leftover run-command costs
 
@@ -91,7 +104,10 @@ has a few consequences worth knowing before you seal an image:
 - They are **not carried into a captured image.** An image is made from the OS
   disk; ARM child resources of the source VM are not part of it. A VM created
   from the image starts with no run commands.
-- They are deleted only when you delete them, or when the VM itself is deleted.
+- They are deleted only when you delete them, or when the VM itself is deleted —
+  and **deleting one requires the VM to be running**, because it is an extension
+  operation. A stranded run command on a stopped VM is harmless but cannot be
+  removed until the VM starts or is deleted.
 
 **But two things the run command touched *are* baked into the image**, because
 they live on the OS disk:
@@ -179,14 +195,19 @@ There are two flavours of run command, and the difference matters here:
 
 ## A cleanup checklist
 
-After sealing an image:
+Do this **before** sealing, while the VM is still running — afterwards the run
+command cannot be deleted:
 
 ```zsh
-./teardown.sh --deallocate                                              # or ./teardown.sh alone
+./teardown.sh --deallocate                                              # delete, then deallocate
 az vm run-command list -g <rg> --vm-name <vm> --query "[].name" -o tsv   # expect empty
 az vm get-instance-view -g <rg> -n <vm> \
   --query "instanceView.statuses[?starts_with(code,'PowerState/')].displayStatus|[0]" -o tsv
 ```
+
+If you have already captured and stopped the VM, the stranded run command is not
+worth starting a generalised VM to remove. Leave it: it costs nothing, and it
+goes away with the VM.
 
 The last command should print `VM deallocated`. `VM stopped` is **not** the same
 thing — a stopped-but-allocated VM still bills for compute. Use

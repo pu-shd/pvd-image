@@ -89,14 +89,28 @@ case "$args" in
         emit_full_json
       fi
     else
-      # Existence probe for a stale resource.
-      [[ "${MOCK_STALE_RUNCMD:-0}" == "1" ]] && exit 0
+      # Existence probe. MOCK_DELETE_NOOP simulates a delete that silently does
+      # not take effect, so the post-delete verification can be exercised.
+      if [[ "${MOCK_STALE_RUNCMD:-0}" == "1" ]]; then
+        deleted=0
+        [[ -n "${MOCK_CALL_LOG:-}" && -f "${MOCK_CALL_LOG}.deleted" ]] && deleted=1
+        if [[ "$deleted" == "1" && "${MOCK_DELETE_NOOP:-0}" != "1" ]]; then
+          exit 1   # gone, as a real delete would leave it
+        fi
+        exit 0
+      fi
       exit 1
     fi
     ;;
 
   "vm run-command create"*) ;;
-  "vm run-command delete"*) ;;
+  "vm run-command delete"*)
+    # Record the delete so a later existence probe reflects it.
+    [[ -n "${MOCK_CALL_LOG:-}" ]] && export MOCK_DELETED=1
+    if [[ -n "${MOCK_CALL_LOG:-}" ]]; then
+      printf '1' > "${MOCK_CALL_LOG}.deleted"
+    fi
+    ;;
 
   *)
     echo "mock az: unhandled invocation: $args" >&2

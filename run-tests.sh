@@ -15,7 +15,7 @@ mkdir -p "$RESULTS"
 overall=0
 
 echo "======================================================================"
-echo " Suite 1/4: Pester - guest installer logic"
+echo " Suite 1/5: Pester - guest installer logic"
 echo "======================================================================"
 
 pwsh -NoLogo -NonInteractive -Command "
@@ -44,7 +44,7 @@ echo "Pester suite exit code: $pester_rc"
 
 echo
 echo "======================================================================"
-echo " Suite 2/4: zsh - deploy.sh driver against a mocked Azure CLI"
+echo " Suite 2/5: zsh - deploy.sh driver against a mocked Azure CLI"
 echo "======================================================================"
 
 zsh "$ROOT/tests/test_deploy.zsh" | tee "$RESULTS/deploy-tests.txt"
@@ -60,7 +60,7 @@ fi
 
 echo
 echo "======================================================================"
-echo " Suite 3/4: zsh - repair.sh driver against a mocked Azure CLI"
+echo " Suite 3/5: zsh - repair.sh driver against a mocked Azure CLI"
 echo "======================================================================"
 
 zsh "$ROOT/tests/test_repair.zsh" | tee "$RESULTS/repair-tests.txt"
@@ -75,7 +75,7 @@ fi
 
 echo
 echo "======================================================================"
-echo " Suite 4/4: zsh - shortcuts.sh driver against a mocked Azure CLI"
+echo " Suite 4/5: zsh - shortcuts.sh driver against a mocked Azure CLI"
 echo "======================================================================"
 
 zsh "$ROOT/tests/test_shortcuts.zsh" | tee "$RESULTS/shortcut-tests.txt"
@@ -85,6 +85,21 @@ echo "shortcuts suite exit code: $shortcut_rc"
 
 if ! grep -q '^passed: [0-9]' "$RESULTS/shortcut-tests.txt" 2>/dev/null; then
   echo "ERROR: shortcuts.sh suite produced no summary line - treating as failure." >&2
+  overall=1
+fi
+
+echo
+echo "======================================================================"
+echo " Suite 5/5: zsh - teardown.sh driver against a mocked Azure CLI"
+echo "======================================================================"
+
+zsh "$ROOT/tests/test_teardown.zsh" | tee "$RESULTS/teardown-tests.txt"
+teardown_rc=${PIPESTATUS[0]}
+[[ $teardown_rc -ne 0 ]] && overall=1
+echo "teardown suite exit code: $teardown_rc"
+
+if ! grep -q '^passed: [0-9]' "$RESULTS/teardown-tests.txt" 2>/dev/null; then
+  echo "ERROR: teardown.sh suite produced no summary line - treating as failure." >&2
   overall=1
 fi
 

@@ -74,6 +74,40 @@ while it still contains the template placeholders.
 Expect **30–45 minutes** for a Visual Studio install on 8 vCPUs, and seconds for
 shortcuts. Every run saves the raw run-command instance view under `logs/`.
 
+## More than one image, or config in its own repo
+
+`config.env` next to the scripts is the simple case. Any driver will instead use
+whatever `AVD_CONFIG` points at:
+
+```zsh
+AVD_CONFIG=~/images/orf531.env ./deploy.sh --start
+AVD_CONFIG=~/images/studentlab.env ./deploy.sh --start
+```
+
+That makes a two-repo split practical, and it is how this is used in practice:
+this repository stays public and generic, while each image's identifiers and
+version pins live in their own **private** repo — one per image, named for it.
+A three-line wrapper beside the config is usually enough:
+
+```zsh
+#!/usr/bin/env zsh
+# ./pvd deploy --start
+SCRIPT_DIR="${0:A:h}"
+AVD_CONFIG="$SCRIPT_DIR/config.env" exec "${SCRIPT_DIR:h}/pvd-image/$1.sh" "${@:2}"
+```
+
+Benefits worth the small indirection:
+
+- Subscription IDs and host names never enter this repository, so it can stay
+  public and `tools/scrub-check.sh` can enforce that mechanically
+- Each image gets its own history: the version pin that was in effect for a given
+  capture is a commit in that image's repo, not a local edit nobody recorded
+- Fixes to the tooling reach every image with one `git pull` here
+
+Whatever wrapper you use, pass arguments through unchanged so the documentation
+below still applies, and map commands explicitly rather than interpolating
+`"$1.sh"` if the wrapper might ever take untrusted input.
+
 ## What's included
 
 | Path | Purpose |

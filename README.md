@@ -69,7 +69,13 @@ az login
 ```
 
 `config.env` is git-ignored; it holds your identifiers. The scripts refuse to run
-while it still contains the template placeholders.
+while it still contains the template placeholders — including
+`VS_EXPECTED_VERSION`, which the template deliberately leaves unset. This
+repository ships no opinion about which Visual Studio version your image should
+have: look up the current release in the
+[release history](https://learn.microsoft.com/en-us/visualstudio/releases/2026/release-history)
+and pin it yourself. Versions mentioned in the docs below are worked examples,
+not defaults.
 
 Expect **30–45 minutes** for a Visual Studio install on 8 vCPUs, and seconds for
 shortcuts. Every run saves the raw run-command instance view under `logs/`.
@@ -80,8 +86,8 @@ shortcuts. Every run saves the raw run-command instance view under `logs/`.
 whatever `AVD_CONFIG` points at:
 
 ```zsh
-AVD_CONFIG=~/images/orf531.env ./deploy.sh --start
-AVD_CONFIG=~/images/studentlab.env ./deploy.sh --start
+AVD_CONFIG=~/images/lab-a.env ./deploy.sh --start
+AVD_CONFIG=~/images/lab-b.env ./deploy.sh --start
 ```
 
 That makes a two-repo split practical, and it is how this is used in practice:
@@ -163,9 +169,9 @@ docker-compose build
 docker-compose run --rm tests
 ```
 
-**188 tests** across five suites, requiring no Azure subscription and no Windows
+**191 tests** across five suites, requiring no Azure subscription and no Windows
 host: 102 Pester tests over the guest decision logic (external edges mocked),
-plus 86 zsh tests driving each shell entry point against a mock `az` in
+plus 89 zsh tests driving each shell entry point against a mock `az` in
 `tests/mocks/az`.
 The runner fails if any suite fails, and also if a suite reports zero tests or no
 summary line — an empty run must not look green.

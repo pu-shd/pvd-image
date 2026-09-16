@@ -196,6 +196,25 @@ check "refuses to run with unedited template placeholders" "$(( rc != 0 ))"
 check "names the placeholder variable it found" \
       "$([[ "$out" == *"AVD_SUBSCRIPTION_ID"* ]] && print 1 || print 0)"
 
+# The template ships no version opinion, so an unset version pin must be caught
+# too - otherwise the first run fails on a confusing drift comparison instead.
+cat > "$WORK/noversion.env" <<'CFG'
+AVD_SUBSCRIPTION_ID="mock-sub"
+AVD_RESOURCE_GROUP="mock-rg"
+AVD_VM_NAME="MOCK-VM"
+VS_EXPECTED_VERSION="REPLACE_WITH_VS_VERSION"
+CFG
+out=$(PATH="$MOCK_DIR:$PATH" AVD_CONFIG="$WORK/noversion.env" \
+      AVD_LOG_DIR="$WORK/logs" "$ROOT/deploy.sh" 2>&1); rc=$?
+check "refuses to run with an unedited VS_EXPECTED_VERSION placeholder" "$(( rc != 0 ))"
+check "names VS_EXPECTED_VERSION as the placeholder" \
+      "$([[ "$out" == *"VS_EXPECTED_VERSION"* ]] && print 1 || print 0)"
+
+# The shipped template itself must trip the guard rather than half-work.
+out=$(PATH="$MOCK_DIR:$PATH" AVD_CONFIG="$ROOT/config.env.example" \
+      AVD_LOG_DIR="$WORK/logs" "$ROOT/deploy.sh" 2>&1); rc=$?
+check "config.env.example as-shipped is rejected until edited" "$(( rc != 0 ))"
+
 print -r -- ""
 print -r -- "passed: $PASS   failed: $FAIL"
 if (( FAIL )); then

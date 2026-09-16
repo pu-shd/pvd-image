@@ -27,7 +27,7 @@ load_config() {
 
   # A copied-but-unedited template is a common first-run mistake, and the error
   # from Azure would otherwise be an opaque "resource not found".
-  for v in AVD_SUBSCRIPTION_ID AVD_RESOURCE_GROUP AVD_VM_NAME; do
+  for v in AVD_SUBSCRIPTION_ID AVD_RESOURCE_GROUP AVD_VM_NAME VS_EXPECTED_VERSION; do
     if [[ "${(P)v}" == REPLACE_WITH_* ]]; then
       die "$v is still the placeholder from config.env.example - set it to your own value in $cfg"
       return 1

@@ -35,6 +35,20 @@ Describe 'PyKX script is valid PowerShell as shipped' {
             $names | Should -Contain $n
         }
     }
+    It 'passes no cmd metacharacters in code it runs through cmd /c' {
+        # Arguments after the .cmd path reach cmd unquoted; '|' once turned the
+        # licence self-test into a pipe on a real guest.
+        $codeVars = @($script:PAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $n.Left.Extent.Text -eq '$code' }, $true))
+        $codeVars.Count | Should -BeGreaterThan 0
+        foreach ($c in $codeVars) { $c.Right.Extent.Text | Should -Not -Match '[&|<>^%]' }
+        $calls = @($script:PAst.FindAll({ param($n)
+            $n -is [System.Management.Automation.Language.CommandAst] -and
+            $n.GetCommandName() -eq 'Invoke-Native' -and $n.Extent.Text -like "*'/c'*" }, $true))
+        $calls.Count | Should -BeGreaterThan 1
+        foreach ($c in $calls) { ($c.Extent.Text -split "'/c'")[1] | Should -Not -Match '[&|<>^%]' }
+    }
     It 'pins the VC++ runtime download to a SHA-256' {
         $script:VcSha256 | Should -Match '^[0-9a-f]{64}$'
     }
@@ -246,7 +260,7 @@ Describe 'Invoke-Main' {
             if ($Arguments -contains '/c' -and ($Arguments -join ' ') -like '*environ*') {
                 # Stands in for the real .cmd: QLIC is %USERPROFILE%\<folder>.
                 $q = if ($script:WrapperFindsLicence) { [IO.Path]::Combine($env:USERPROFILE, 'kx') } else { 'None' }
-                return [pscustomobject]@{ Code = 0; Text = "$q|None" }
+                return [pscustomobject]@{ Code = 0; Text = "$q+None" }
             }
             if ($Arguments -contains '/c') { return [pscustomobject]@{ Code = $script:CheckExit; Text = 'instinfo quote trade' } }
             $script:UvCalls += ,@($Arguments)

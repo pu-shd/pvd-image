@@ -486,14 +486,16 @@ function Invoke-Main {
         $realHome = $env:USERPROFILE
         try {
             [Environment]::SetEnvironmentVariable('USERPROFILE', $fakeHome, 'Process')
-            $code = "print(__import__('os').environ.get('QLIC'),__import__('os').environ.get('PYKX_UNLICENSED'),sep='|')"
+            # No cmd metacharacters (& | < > ^ %): this passes through cmd /c
+            # unquoted, where '|' would start a pipe.
+            $code = "print(__import__('os').environ.get('QLIC'),__import__('os').environ.get('PYKX_UNLICENSED'),sep='+')"
             $r = Invoke-Native -File $cmd -Arguments @('/c', $pyCmd, '-c', $code)
         } finally {
             [Environment]::SetEnvironmentVariable('USERPROFILE', $realHome, 'Process')
         }
         $seen = (($r.Text -split "`n")[-1]).Trim()
-        if ($r.Code -ne 0 -or $seen -ne "$fakeDir|None") {
-            throw "$Prefix-python did not pick up a licence in %USERPROFILE%\$LicenseDir (saw '$seen', expected '$fakeDir|None')"
+        if ($r.Code -ne 0 -or $seen -ne "$fakeDir+None") {
+            throw "$Prefix-python did not pick up a licence in %USERPROFILE%\$LicenseDir (saw '$seen', expected '$fakeDir+None')"
         }
         Write-Log "$Prefix-python finds a user's licence in %USERPROFILE%\$LicenseDir and runs licensed"
 

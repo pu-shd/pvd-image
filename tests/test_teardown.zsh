@@ -115,6 +115,23 @@ check "says the resource still exists" \
       "$([[ "$out" == *"still exists"* ]] && print 1 || print 0)"
 unset MOCK_DELETE_NOOP
 
+# --------------------------------------- every driver's run-command, not one --
+# deploy.sh, shortcuts.sh and pykx.sh each leave their own resource behind.
+run_teardown success --yes; rc=$?
+for n in install-vs-cpp set-desktop-shortcuts install-pykx-client; do
+  check "deletes the '$n' run-command" \
+        "$(grep -q -- "^vm run-command delete.*--name $n " "$WORK/calls.log" && print 1 || print 0)"
+done
+
+MOCK_RUNCMD_NAMES="install-pykx-client" run_teardown success --yes; rc=$?
+check "removes only the run-commands that exist" "$(( rc == 0 ))"
+check "issues exactly one delete when one resource exists" \
+      "$(( $(grep -c '^vm run-command delete' "$WORK/calls.log") == 1 ))"
+
+MOCK_RUNCMD_NAMES="set-desktop-shortcuts" run_teardown deallocated --yes; rc=$?
+check "names a stranded shortcuts run-command on a stopped VM" \
+      "$([[ "$rc" != 0 && "$out" == *"set-desktop-shortcuts"* ]] && print 1 || print 0)"
+
 # ----------------------------------------------------------- argument guard ---
 run_teardown success --nonsense --yes; rc=$?
 check "rejects unknown arguments" "$(( rc != 0 ))"

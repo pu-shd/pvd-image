@@ -66,3 +66,8 @@ wait_for_agent() {
   die "guest agent did not become ready in time"
 }
 
+# Every run-command resource the drivers create, for teardown.sh.
+# AVD_RUNCMD_NAME is deploy.sh's, configurable; the others are fixed.
+tooling_runcmd_names() {
+  print -r -- "${AVD_RUNCMD_NAME:-install-vs-cpp}" set-desktop-shortcuts install-pykx-client
+}

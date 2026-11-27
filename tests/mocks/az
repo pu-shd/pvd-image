@@ -10,6 +10,15 @@ set -uo pipefail
 args="$*"
 scenario="${MOCK_SCENARIO:-success}"
 
+# The value of --name in this invocation.
+runcmd_name() {
+  local prev=""
+  for a in "$@" ${args}; do
+    [[ "$prev" == "--name" ]] && { printf '%s' "$a"; return; }
+    prev="$a"
+  done
+}
+
 # The guest's stdout for the current scenario, as the guest would emit it.
 guest_output() {
   case "$scenario" in
@@ -91,10 +100,16 @@ case "$args" in
     else
       # Existence probe. MOCK_DELETE_NOOP simulates a delete that silently does
       # not take effect, so the post-delete verification can be exercised.
+      # MOCK_STALE_RUNCMD=1: every name exists, or only those listed in
+      # MOCK_RUNCMD_NAMES. Deletes are recorded per name.
       if [[ "${MOCK_STALE_RUNCMD:-0}" == "1" ]]; then
-        deleted=0
-        [[ -n "${MOCK_CALL_LOG:-}" && -f "${MOCK_CALL_LOG}.deleted" ]] && deleted=1
-        if [[ "$deleted" == "1" && "${MOCK_DELETE_NOOP:-0}" != "1" ]]; then
+        name="$(runcmd_name)"
+        if [[ -n "${MOCK_RUNCMD_NAMES:-}" && " ${MOCK_RUNCMD_NAMES} " != *" $name "* ]]; then
+          exit 1
+        fi
+        if [[ -n "${MOCK_CALL_LOG:-}" && -f "${MOCK_CALL_LOG}.deleted" ]] \
+           && grep -qxF -- "$name" "${MOCK_CALL_LOG}.deleted" \
+           && [[ "${MOCK_DELETE_NOOP:-0}" != "1" ]]; then
           exit 1   # gone, as a real delete would leave it
         fi
         exit 0
@@ -108,7 +123,7 @@ case "$args" in
     # Record the delete so a later existence probe reflects it.
     [[ -n "${MOCK_CALL_LOG:-}" ]] && export MOCK_DELETED=1
     if [[ -n "${MOCK_CALL_LOG:-}" ]]; then
-      printf '1' > "${MOCK_CALL_LOG}.deleted"
+      printf '%s\n' "$(runcmd_name)" >> "${MOCK_CALL_LOG}.deleted"
     fi
     ;;
 

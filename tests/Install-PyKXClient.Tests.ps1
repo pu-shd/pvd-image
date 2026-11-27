@@ -30,7 +30,8 @@ Describe 'PyKX script is valid PowerShell as shipped' {
     It 'exposes every parameter the driver passes' {
         $names = $script:PAst.ParamBlock.Parameters.Name.VariablePath.UserPath
         foreach ($n in 'Action','InstallPath','PykxVersion','PythonVersion','UvVersion','UvSha256',
-                       'CommandPrefix','ExtraPackages','CheckHost','CheckPort') {
+                       'CommandPrefix','ExtraPackages','CheckHost','CheckPort',
+                       'LicenseFolder','DesktopReadme','DesktopReadmeBase64') {
             $names | Should -Contain $n
         }
     }
@@ -44,6 +45,7 @@ Describe 'Assert-Inputs' {
         $script:Good = @{
             Pykx = '4.2.0'; Python = '3.12'; Uv = '0.8.0'
             Sha = ('a' * 64); Prefix = 'hfm'; HostName = 'q.example.invalid'; Port = '6005'
+            LicenseDir = 'kx'; Readme = 'HFM read me.txt'; ReadmeB64 = 'aGk='
         }
     }
     It 'accepts good values' { { Assert-Inputs @script:Good } | Should -Not -Throw }
@@ -62,6 +64,12 @@ Describe 'Assert-Inputs' {
         @{ Name = 'a port of 0';                             Key = 'Port';     Value = '0' }
         @{ Name = 'a port above 65535';                      Key = 'Port';     Value = '65536' }
         @{ Name = 'a port that is not a number';             Key = 'Port';     Value = '60x5' }
+        @{ Name = 'a licence folder that climbs out';        Key = 'LicenseDir'; Value = '..' }
+        @{ Name = 'a licence folder with a path in it';      Key = 'LicenseDir'; Value = 'a\b' }
+        @{ Name = 'a desktop file that is not .txt';         Key = 'Readme';   Value = 'readme.cmd' }
+        @{ Name = 'a desktop file with a path in it';        Key = 'Readme';   Value = '..\x.txt' }
+        @{ Name = 'desktop contents that are not base64';    Key = 'ReadmeB64'; Value = 'not base64!' }
+        @{ Name = 'a desktop file name with no contents';    Key = 'ReadmeB64'; Value = '' }
     ) {
         $v = $script:Good.Clone(); $v[$Key] = $Value
         { Assert-Inputs @v } | Should -Throw
@@ -105,25 +113,68 @@ Describe 'Test-UvVersionText' {
     It 'is false for no output' { Test-UvVersionText -Text '' -Version '0.8.0' | Should -BeFalse }
 }
 
-Describe 'Get-WrapperContent' {
-    It 'always writes PREFIX-python, passing arguments through' {
-        $w = Get-WrapperContent -Prefix 'hfm'
-        $w.Keys | Should -Contain 'hfm-python.cmd'
-        $w['hfm-python.cmd'] | Should -BeLike '*venv\Scripts\python.exe" %*'
+Describe 'ConvertFrom-ReadmeBase64' {
+    It 'round-trips quotes, backticks and non-ASCII text' {
+        $text = "q('select from trade where date=2024.02.12, sym=``ES')`r`n""quoted"" caf$([char]0xE9)`r`n"
+        $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text))
+        ConvertFrom-ReadmeBase64 -Base64 $b64 | Should -BeExactly $text
     }
-    It 'finds the venv relative to the .cmd itself' {
-        (Get-WrapperContent -Prefix 'hfm')['hfm-python.cmd'] | Should -BeLike '*%~dp0..\venv*'
+    It 'turns LF line endings into CRLF, once' {
+        $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("a`nb`r`nc`n"))
+        ConvertFrom-ReadmeBase64 -Base64 $b64 | Should -BeExactly "a`r`nb`r`nc`r`n"
+    }
+    It 'refuses more than 64 KB' {
+        $b64 = [Convert]::ToBase64String((New-Object byte[] 65537))
+        { ConvertFrom-ReadmeBase64 -Base64 $b64 } | Should -Throw -ExpectedMessage '*64 KB*'
+    }
+    It 'refuses bytes that are not UTF-8' {
+        $b64 = [Convert]::ToBase64String([byte[]](0xFF, 0xFE, 0xFD))
+        { ConvertFrom-ReadmeBase64 -Base64 $b64 } | Should -Throw
+    }
+}
+
+Describe 'Get-WrapperContent' {
+    BeforeAll { $script:Py = (Get-WrapperContent -Prefix 'hfm')['hfm-python.cmd'] }
+    It 'writes PREFIX-python, passing arguments through to the venv Python' {
+        $script:Py | Should -BeLike '*"%~dp0..\venv\Scripts\python.exe" %*'
+    }
+    It 'keeps its variables out of the user''s console' {
+        ($script:Py -split "`r`n")[1] | Should -Be 'setlocal'
+    }
+    It 'looks for a licence in personal OneDrive, work OneDrive, then the profile' {
+        $script:Py | Should -BeLike '*if defined OneDrive call :try "%OneDrive%\kx"*'
+        $script:Py | Should -BeLike '*if defined OneDriveCommercial call :try "%OneDriveCommercial%\kx"*'
+        $script:Py | Should -BeLike '*call :try "%USERPROFILE%\kx"*'
+    }
+    It 'accepts kc.lic or k4.lic, and points QLIC at the folder, not the file' {
+        $script:Py | Should -BeLike '*if exist "%~1\kc.lic" set "QLIC=%~1"*'
+        $script:Py | Should -BeLike '*if exist "%~1\k4.lic" set "QLIC=%~1"*'
+    }
+    It 'respects a QLIC the user already set' {
+        ($script:Py -split "`r`n" | Where-Object { $_ -like '*call :try*' }) | ForEach-Object { $_ | Should -BeLike 'if not defined QLIC *' }
+    }
+    It 'falls back to unlicensed only when no licence was found' {
+        $script:Py | Should -BeLike '*if not defined QLIC set "PYKX_UNLICENSED=true"*'
+    }
+    It 'runs Python before the :try subroutine, and exits with its code' {
+        $lines = $script:Py -split "`r`n"
+        [array]::IndexOf($lines, 'exit /b') | Should -BeGreaterThan ([array]::IndexOf($lines, '"%~dp0..\venv\Scripts\python.exe" %*'))
+        [array]::IndexOf($lines, ':try') | Should -BeGreaterThan ([array]::IndexOf($lines, 'exit /b'))
+    }
+    It 'uses the configured licence folder' {
+        (Get-WrapperContent -Prefix 'hfm' -LicenseFolder 'orf445-kx')['hfm-python.cmd'] | Should -BeLike '*%OneDrive%\orf445-kx*'
     }
     It 'writes no test command without a check host' {
         (Get-WrapperContent -Prefix 'hfm').Keys | Should -Not -Contain 'hfm-test.cmd'
     }
-    It 'writes PREFIX-test with the host, port and a timeout' {
+    It 'writes PREFIX-test through PREFIX-python, so it gets the same licence logic' {
         $t = (Get-WrapperContent -Prefix 'hfm' -HostName 'q.example.invalid' -Port '6005')['hfm-test.cmd']
+        $t | Should -BeLike '@call "%~dp0hfm-python.cmd" -c *'
         $t | Should -BeLike "*SyncQConnection('q.example.invalid', 6005, timeout=10)*"
-        $t | Should -BeLike "*tables``[``]*"
     }
     It 'uses CRLF line endings for cmd.exe' {
-        (Get-WrapperContent -Prefix 'hfm')['hfm-python.cmd'] | Should -BeLike "*`r`n"
+        $script:Py | Should -BeLike "*`r`n"
+        $script:Py | Should -Not -Match "[^`r]`n"
     }
 }
 
@@ -163,6 +214,11 @@ Describe 'Invoke-Main' {
         $script:UvCalls = @()
         $script:PykxReported = '4.2.0'
         $script:CheckExit = 0
+        $script:LicensedText = 'False'
+        $script:WrapperFindsLicence = $true
+        $script:Desktop = Join-Path ([IO.Path]::GetTempPath()) "pykx-desk-$(Get-Random)"
+        [void][IO.Directory]::CreateDirectory($script:Desktop)
+        Mock Get-PublicDesktop { $script:Desktop }
 
         Mock Out-Line { }
         Mock Write-Log { }
@@ -183,6 +239,15 @@ Describe 'Invoke-Main' {
         Mock Invoke-Native {
             param($File, $Arguments)
             if ($Arguments -contains '--version') { return [pscustomobject]@{ Code = 0; Text = 'uv 0.8.0 (x 2025-07-17)' } }
+            if ($Arguments -contains '/c' -and ($Arguments -join ' ') -clike "*__import__('pykx').licensed*") {
+                $script:ModeCheckEnv = @{ U = $env:PYKX_UNLICENSED; Q = $env:QLIC }
+                return [pscustomobject]@{ Code = 0; Text = $script:LicensedText }
+            }
+            if ($Arguments -contains '/c' -and ($Arguments -join ' ') -like '*environ*') {
+                # Stands in for the real .cmd: QLIC is %USERPROFILE%\<folder>.
+                $q = if ($script:WrapperFindsLicence) { [IO.Path]::Combine($env:USERPROFILE, 'kx') } else { 'None' }
+                return [pscustomobject]@{ Code = 0; Text = "$q|None" }
+            }
             if ($Arguments -contains '/c') { return [pscustomobject]@{ Code = $script:CheckExit; Text = 'instinfo quote trade' } }
             $script:UvCalls += ,@($Arguments)
             return [pscustomobject]@{ Code = 0; Text = '' }
@@ -199,6 +264,7 @@ Describe 'Invoke-Main' {
     }
     AfterEach {
         [IO.Directory]::Delete($script:Root, $true)
+        [IO.Directory]::Delete($script:Desktop, $true)
     }
 
     It 'succeeds and reports the versions it read back' {
@@ -219,10 +285,48 @@ Describe 'Invoke-Main' {
         $venv = $script:UvCalls | Where-Object { $_[0] -eq 'venv' }
         $venv | Should -Contain 'only-managed'
     }
-    It 'sets PYKX_UNLICENSED and puts bin on the machine PATH' {
+    It 'puts bin on the machine PATH and sets no machine-wide PYKX_UNLICENSED' {
         Invoke-Main @script:MainArgs | Out-Null
-        $script:Machine.PYKX_UNLICENSED | Should -Be 'true'
         $script:Machine.Path | Should -BeLike "%SystemRoot%\system32;*bin"
+        $script:Machine.PYKX_UNLICENSED | Should -BeNullOrEmpty
+    }
+    It 'removes a machine-wide PYKX_UNLICENSED left by an earlier version' {
+        $script:Machine.PYKX_UNLICENSED = 'true'
+        Invoke-Main @script:MainArgs | Should -Be 0
+        $script:Machine.PYKX_UNLICENSED | Should -BeNullOrEmpty
+    }
+    It 'checks the unlicensed fallback with nothing inherited from its own checks' {
+        $env:PYKX_UNLICENSED = 'true'; $env:QLIC = 'C:\somewhere'
+        Invoke-Main @script:MainArgs | Should -Be 0
+        $script:ModeCheckEnv.U | Should -BeNullOrEmpty
+        $script:ModeCheckEnv.Q | Should -BeNullOrEmpty
+    }
+    It 'FAILS when PREFIX-python starts licensed with no user licence' {
+        $script:LicensedText = 'True'
+        Invoke-Main @script:MainArgs | Should -Be 1
+        Should -Invoke Out-Line -ParameterFilter { $Text -like 'AVD_REASON=*must not carry*' }
+    }
+    It 'FAILS when PREFIX-python does not pick up a licence in the profile' {
+        $script:WrapperFindsLicence = $false
+        Invoke-Main @script:MainArgs | Should -Be 1
+        Should -Invoke Out-Line -ParameterFilter { $Text -like 'AVD_REASON=*did not pick up a licence*' }
+    }
+    It 'puts USERPROFILE back after the licence test' {
+        $before = $env:USERPROFILE
+        Invoke-Main @script:MainArgs | Out-Null
+        $env:USERPROFILE | Should -Be $before
+    }
+    It 'writes the desktop file with CRLF line endings and reports it' {
+        $script:MainArgs.Readme = 'HFM read me.txt'
+        $script:MainArgs.ReadmeB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("line 1`nsym=``ES`n"))
+        Invoke-Main @script:MainArgs | Should -Be 0
+        [IO.File]::ReadAllText([IO.Path]::Combine($script:Desktop, 'HFM read me.txt')) | Should -BeExactly "line 1`r`nsym=``ES`r`n"
+        Should -Invoke Out-Line -ParameterFilter { $Text -eq 'AVD_README=HFM read me.txt' }
+    }
+    It 'reports no desktop file when none is asked for' {
+        Invoke-Main @script:MainArgs | Out-Null
+        Should -Invoke Out-Line -ParameterFilter { $Text -eq 'AVD_README=' }
+        @([IO.Directory]::GetFiles($script:Desktop)).Count | Should -Be 0
     }
     It 'writes the user commands' {
         $script:MainArgs.HostName = 'q.example.invalid'; $script:MainArgs.Port = '6005'
@@ -262,9 +366,19 @@ Describe 'Invoke-Main' {
     }
     It 'remove takes out the PATH entry and the variable' {
         Invoke-Main @script:MainArgs | Out-Null
+        $script:Machine.PYKX_UNLICENSED = 'true'
         $script:MainArgs.Mode = 'remove'
         Invoke-Main @script:MainArgs | Should -Be 0
         $script:Machine.Path | Should -Be '%SystemRoot%\system32'
         $script:Machine.PYKX_UNLICENSED | Should -BeNullOrEmpty
+    }
+    It 'remove deletes the desktop file' {
+        Mock Test-Path { param($LiteralPath) [IO.File]::Exists($LiteralPath) }
+        Mock Remove-Item { param($LiteralPath) [IO.File]::Delete($LiteralPath) } -ParameterFilter { $LiteralPath -like '*.txt' }
+        $file = [IO.Path]::Combine($script:Desktop, 'HFM read me.txt')
+        [IO.File]::WriteAllText($file, 'x')
+        $script:MainArgs.Mode = 'remove'; $script:MainArgs.Readme = 'HFM read me.txt'
+        Invoke-Main @script:MainArgs | Should -Be 0
+        [IO.File]::Exists($file) | Should -BeFalse
     }
 }

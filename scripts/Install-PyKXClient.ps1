@@ -14,9 +14,17 @@
       bin\<prefix>-python.cmd   Python from that environment   (bin is on PATH)
       bin\<prefix>-test.cmd     queries -CheckHost:-CheckPort, if given
 
-    It also sets the machine variable PYKX_UNLICENSED=true. Unlicensed PyKX
-    sends queries to a q server over IPC; it cannot run q locally and needs no
-    kdb licence. Never put a kdb licence on an image.
+    The commands choose PyKX's mode each time they start. A user who has their
+    own kdb licence puts kc.lic or k4.lic in OneDrive\<LicenseFolder> (or
+    %USERPROFILE%\<LicenseFolder>, or sets QLIC), and PyKX runs licensed, with
+    q in the Python process. Without one, the commands set PYKX_UNLICENSED=true
+    for that run: PyKX then sends queries to a q server over IPC, cannot run q
+    locally and needs no licence. Never put a kdb licence on an image; the
+    install fails if the commands find one.
+
+    -DesktopReadme names a text file for the all-users desktop, and
+    -DesktopReadmeBase64 carries its contents (base64, so that quotes and
+    backticks in examples survive run-command parameter passing).
 
     If msvcr100.dll, the Visual C++ 2010 runtime PyKX loads on Windows, is
     missing, installs Microsoft's VC++ 2010 SP1 x64 package after checking its
@@ -47,6 +55,15 @@ param(
     # A q server to query once installed. Empty skips the check.
     [string] $CheckHost = '',
     [string] $CheckPort = '',
+
+    # Folder under the user's OneDrive (or profile) the commands look in for
+    # a personal kdb licence.
+    [string] $LicenseFolder = 'kx',
+
+    # A text file for the all-users desktop: its name, and its contents as
+    # base64 UTF-8. Both empty writes none.
+    [string] $DesktopReadme = '',
+    [string] $DesktopReadmeBase64 = '',
 
     [ValidateSet('install','remove')]
     [string] $Action = 'install',
@@ -94,6 +111,7 @@ function Write-Result {
         [string]$Python = '',
         [string]$Uv = '',
         [ValidateSet('ok','failed','skipped','')][string]$Check = '',
+        [string]$Readme = '',
         [string]$Reason = ''
     )
     Out-Line "AVD_STATUS=$Status"
@@ -101,6 +119,7 @@ function Write-Result {
     Out-Line "AVD_PYTHON_VERSION=$Python"
     Out-Line "AVD_UV_VERSION=$Uv"
     Out-Line "AVD_CHECK=$Check"
+    Out-Line "AVD_README=$Readme"
     Out-Line "AVD_REASON=$Reason"
 }
 
@@ -118,13 +137,16 @@ function Join-WindowsPath {
 function Assert-Inputs {
     param(
         [string]$Pykx, [string]$Python, [string]$Uv, [string]$Sha,
-        [string]$Prefix, [string]$HostName, [string]$Port
+        [string]$Prefix, [string]$HostName, [string]$Port,
+        [string]$LicenseDir = 'kx', [string]$Readme = '', [string]$ReadmeB64 = ''
     )
     if ($Pykx   -notmatch '^\d+(\.\d+){1,3}$') { throw "PykxVersion '$Pykx' is not a version like 4.2.0." }
     if ($Python -notmatch '^3\.\d+(\.\d+)?$') { throw "PythonVersion '$Python' is not a version like 3.12." }
     if ($Uv     -notmatch '^\d+\.\d+\.\d+$')   { throw "UvVersion '$Uv' is not a version like 0.8.0." }
     if ($Sha    -notmatch '^[0-9a-fA-F]{64}$') { throw 'UvSha256 is not a 64-character hex SHA-256.' }
     if ($Prefix -notmatch '^[A-Za-z][A-Za-z0-9_-]{0,31}$') { throw "CommandPrefix '$Prefix' must be letters, digits, '-' or '_'." }
+    if ($LicenseDir -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' -or $LicenseDir -match '\.\.') { throw "LicenseFolder '$LicenseDir' must be one folder name." }
+    Assert-Readme -Name $Readme -Base64 $ReadmeB64
     if ($HostName -or $Port) {
         if ($HostName -notmatch '^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$') {
             throw "CheckHost '$HostName' is not a host name."
@@ -134,6 +156,34 @@ function Assert-Inputs {
             throw "CheckPort '$Port' is not a port number."
         }
     }
+}
+
+# The desktop file: a plain .txt name, and base64 that decodes to at most
+# 64 KB of UTF-8. Both or neither.
+function Assert-Readme {
+    param([string]$Name = '', [string]$Base64 = '')
+    if (-not $Name -and -not $Base64) { return }
+    if (-not $Name -or -not $Base64) { throw 'DesktopReadme and DesktopReadmeBase64 must be given together.' }
+    if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,79}\.txt$' -or $Name -match '\.\.') {
+        throw "DesktopReadme '$Name' must be a plain .txt file name."
+    }
+    [void](ConvertFrom-ReadmeBase64 -Base64 $Base64)
+}
+
+function ConvertFrom-ReadmeBase64 {
+    param([Parameter(Mandatory)][string]$Base64)
+    if ($Base64 -notmatch '^[A-Za-z0-9+/]+={0,2}$') { throw 'DesktopReadmeBase64 is not base64.' }
+    try { $bytes = [Convert]::FromBase64String($Base64) } catch { throw 'DesktopReadmeBase64 is not base64.' }
+    if ($bytes.Length -gt 65536) { throw 'The desktop file is larger than 64 KB.' }
+    $text = (New-Object System.Text.UTF8Encoding($false, $true)).GetString($bytes)
+    # Notepad copes with LF, but CRLF is what every Windows editor expects.
+    return (($text -replace "`r`n", "`n") -replace "`n", "`r`n")
+}
+
+function Get-PublicDesktop {
+    $dir = [Environment]::GetFolderPath('CommonDesktopDirectory')
+    if ([string]::IsNullOrWhiteSpace($dir)) { $dir = 'C:\Users\Public\Desktop' }
+    return $dir
 }
 
 # 'a==1;b' -> @('a==1','b'). A pip requirement name with an optional extras
@@ -161,18 +211,37 @@ function Test-UvVersionText {
 
 # The .cmd files users run. %~dp0 is the folder the .cmd sits in, so they keep
 # working if the install folder is moved.
+#
+# <prefix>-python decides PyKX's mode on every start: licensed if QLIC is set
+# or a kc.lic/k4.lic is in OneDrive\<folder> (personal or work OneDrive) or
+# %USERPROFILE%\<folder>; otherwise PYKX_UNLICENSED=true for this run only.
+# setlocal keeps both from leaking into the user's console.
 function Get-WrapperContent {
     param(
         [Parameter(Mandatory)][string]$Prefix,
         [string]$HostName = '',
-        [string]$Port = ''
+        [string]$Port = '',
+        [string]$LicenseFolder = 'kx'
     )
-    $py = '"%~dp0..\venv\Scripts\python.exe"'
+    $lines = @(
+        '@echo off'
+        'setlocal'
+        "if not defined QLIC if defined OneDrive call :try `"%OneDrive%\$LicenseFolder`""
+        "if not defined QLIC if defined OneDriveCommercial call :try `"%OneDriveCommercial%\$LicenseFolder`""
+        "if not defined QLIC call :try `"%USERPROFILE%\$LicenseFolder`""
+        'if not defined QLIC set "PYKX_UNLICENSED=true"'
+        '"%~dp0..\venv\Scripts\python.exe" %*'
+        'exit /b'
+        ':try'
+        'if exist "%~1\kc.lic" set "QLIC=%~1"'
+        'if exist "%~1\k4.lic" set "QLIC=%~1"'
+        'exit /b 0'
+    )
     $w = [ordered]@{}
-    $w["$Prefix-python.cmd"] = "@$py %*`r`n"
+    $w["$Prefix-python.cmd"] = ($lines -join "`r`n") + "`r`n"
     if ($HostName) {
         $code = "import pykx as kx; q = kx.SyncQConnection('$HostName', $Port, timeout=10); print(q('tables[]')); q.close()"
-        $w["$Prefix-test.cmd"] = "@$py -c `"$code`"`r`n"
+        $w["$Prefix-test.cmd"] = "@call `"%~dp0$Prefix-python.cmd`" -c `"$code`"`r`n"
     }
     return $w
 }
@@ -275,7 +344,11 @@ function Get-PythonVersion {
 # ------------------------------------------------------------- main ---------
 
 function Invoke-Remove {
-    param([string]$Root)
+    param([string]$Root, [string]$Readme = '')
+    if ($Readme) {
+        $file = Join-WindowsPath (Get-PublicDesktop) $Readme
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file -Force; Write-Log "Removed $file" }
+    }
     $bin = Join-WindowsPath $Root 'bin'
     if (Test-Path -LiteralPath $Root) {
         Remove-Item -LiteralPath $Root -Recurse -Force
@@ -304,7 +377,10 @@ function Invoke-Main {
         [string]$Root          = $InstallPath,
         [string]$Prefix        = $CommandPrefix,
         [string]$HostName      = $CheckHost,
-        [string]$Port          = $CheckPort
+        [string]$Port          = $CheckPort,
+        [string]$LicenseDir    = $LicenseFolder,
+        [string]$Readme        = $DesktopReadme,
+        [string]$ReadmeB64     = $DesktopReadmeBase64
     )
     Initialize-Log -Dir $LogDir
     Write-Log "=== AVD image setup: PyKX client ($Mode) ==="
@@ -312,13 +388,14 @@ function Invoke-Main {
 
     try {
         if ($Mode -eq 'remove') {
-            Invoke-Remove -Root $Root
+            Invoke-Remove -Root $Root -Readme $Readme
             Write-Result -Status success -Check skipped -Reason "removed $Root"
             return 0
         }
 
         Assert-Inputs -Pykx $PykxVer -Python $PythonVer -Uv $UvVer -Sha $UvHash `
-                      -Prefix $Prefix -HostName $HostName -Port $Port
+                      -Prefix $Prefix -HostName $HostName -Port $Port `
+                      -LicenseDir $LicenseDir -Readme $Readme -ReadmeB64 $ReadmeB64
         $extraList = ConvertFrom-PackageList -List $Extra
 
         $tools  = Join-WindowsPath $Root 'tools'
@@ -360,17 +437,19 @@ function Invoke-Main {
         }
 
         # 4. Commands for users.
-        $wrappers = Get-WrapperContent -Prefix $Prefix -HostName $HostName -Port $Port
+        $wrappers = Get-WrapperContent -Prefix $Prefix -HostName $HostName -Port $Port -LicenseFolder $LicenseDir
         foreach ($name in $wrappers.Keys) {
             $file = Join-WindowsPath $bin $name
             [IO.File]::WriteAllText($file, $wrappers[$name], [Text.Encoding]::ASCII)
             Write-Log "Wrote $file"
         }
 
-        # 5. Machine settings, read by every new sign-in.
-        if ((Get-MachineVariable 'PYKX_UNLICENSED') -ne 'true') {
-            Set-MachineVariable 'PYKX_UNLICENSED' 'true'
-            Write-Log 'Set the machine variable PYKX_UNLICENSED=true'
+        # 5. Machine settings, read by every new sign-in. The commands choose
+        # PyKX's mode themselves; a machine-wide PYKX_UNLICENSED, as earlier
+        # versions of this script set, would stop a user's own licence working.
+        if (Get-MachineVariable 'PYKX_UNLICENSED') {
+            Set-MachineVariable 'PYKX_UNLICENSED' $null
+            Write-Log 'Removed the machine variable PYKX_UNLICENSED; the commands set it per run'
         }
         $path = Get-MachinePath
         $newPath = Add-PathEntry -PathValue $path -Entry $bin
@@ -383,10 +462,53 @@ function Invoke-Main {
         if (-not $python.StartsWith("$PythonVer")) { throw "Python in $venv reports '$python', expected $PythonVer" }
         Write-Log "Verified PyKX $pykx on Python $python"
 
+        # The commands, as a user without a licence would run them: nothing
+        # inherited from this script's own checks.
+        foreach ($v in 'PYKX_UNLICENSED', 'QLIC') { [Environment]::SetEnvironmentVariable($v, $null, 'Process') }
+        $cmd = if ($env:ComSpec) { $env:ComSpec } else { 'cmd.exe' }
+        $pyCmd = Join-WindowsPath $bin "$Prefix-python.cmd"
+        # No spaces in the code, so it needs no quotes: given more than two
+        # quotes, cmd /c strips the outer pair and breaks the quoted path.
+        $r = Invoke-Native -File $cmd -Arguments @('/c', $pyCmd, '-c', "print(__import__('pykx').licensed)")
+        $mode = (($r.Text -split "`n")[-1]).Trim()
+        if ($r.Code -ne 0) { throw "$Prefix-python failed to import PyKX (exit $($r.Code)): $($r.Text)" }
+        if ($mode -ne 'False') {
+            throw "$Prefix-python started PyKX licensed ('$mode') with no user licence. A licence file is reachable from this VM; an image must not carry one."
+        }
+        Write-Log "$Prefix-python falls back to unlicensed mode when the user has no licence"
+
+        # And the other branch: a user with a licence file in their profile.
+        # The code imports only os, so the empty stand-in file is never read.
+        $fakeHome = Join-WindowsPath $work 'licence-test'
+        $fakeDir  = Join-WindowsPath $fakeHome $LicenseDir
+        [void][IO.Directory]::CreateDirectory($fakeDir)
+        [IO.File]::WriteAllText((Join-WindowsPath $fakeDir 'kc.lic'), '')
+        $realHome = $env:USERPROFILE
+        try {
+            [Environment]::SetEnvironmentVariable('USERPROFILE', $fakeHome, 'Process')
+            $code = "print(__import__('os').environ.get('QLIC'),__import__('os').environ.get('PYKX_UNLICENSED'),sep='|')"
+            $r = Invoke-Native -File $cmd -Arguments @('/c', $pyCmd, '-c', $code)
+        } finally {
+            [Environment]::SetEnvironmentVariable('USERPROFILE', $realHome, 'Process')
+        }
+        $seen = (($r.Text -split "`n")[-1]).Trim()
+        if ($r.Code -ne 0 -or $seen -ne "$fakeDir|None") {
+            throw "$Prefix-python did not pick up a licence in %USERPROFILE%\$LicenseDir (saw '$seen', expected '$fakeDir|None')"
+        }
+        Write-Log "$Prefix-python finds a user's licence in %USERPROFILE%\$LicenseDir and runs licensed"
+
+        $readmeFile = ''
+        if ($Readme) {
+            $readmeFile = Join-WindowsPath (Get-PublicDesktop) $Readme
+            $text = ConvertFrom-ReadmeBase64 -Base64 $ReadmeB64
+            [IO.File]::WriteAllText($readmeFile, $text, (New-Object System.Text.UTF8Encoding($false)))
+            if ([IO.File]::ReadAllText($readmeFile) -ne $text) { throw "$readmeFile does not hold what was written" }
+            Write-Log "Wrote $readmeFile"
+        }
+
         $check = 'skipped'
         if ($HostName) {
             $test = Join-WindowsPath $bin "$Prefix-test.cmd"
-            $cmd = if ($env:ComSpec) { $env:ComSpec } else { 'cmd.exe' }
             $r = Invoke-Native -File $cmd -Arguments @('/c', $test)
             foreach ($l in $r.Text -split "`n") { Write-Log "  $l" }
             if ($r.Code -ne 0) {
@@ -396,7 +518,7 @@ function Invoke-Main {
             Write-Log "Queried ${HostName}:$Port"
         }
 
-        Write-Result -Status success -Pykx $pykx -Python $python -Uv $UvVer -Check $check -Reason 'installed and verified'
+        Write-Result -Status success -Pykx $pykx -Python $python -Uv $UvVer -Check $check -Readme $Readme -Reason 'installed and verified'
         return 0
 
     } catch {

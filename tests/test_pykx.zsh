@@ -160,6 +160,49 @@ check "--remove passes Action=remove" "$(called 'Action=remove')"
 check "--remove sends no versions" "$(( $(called 'PykxVersion=') == 0 ))"
 unset MOCK_CHECK
 
+# ------------------------------------------------------ licence folder -------
+run_pykx pykx
+check "passes LicenseFolder=kx by default" "$(called 'LicenseFolder=kx')"
+write_config 'PYKX_LICENSE_FOLDER="..\\Windows"'
+run_pykx pykx; rc=$?
+check "refuses a licence folder that climbs out of OneDrive" "$(( rc != 0 ))"
+write_config
+
+# --------------------------------------------------------- desktop file -------
+# Quotes, backticks and a q date literal: what a real example query contains.
+mkdir -p "$WORK/desktop"
+print -rn -- $'HFM read me\n  q(\'select from trade where date=2024.02.12, sym=`ES\')\n  "quoted"\n' > "$WORK/desktop/HFM read me.txt"
+write_config 'PYKX_DESKTOP_README="desktop/HFM read me.txt"'
+MOCK_README="HFM read me.txt" run_pykx pykx; rc=$?
+check "succeeds when the guest confirms the desktop file" "$(( rc == 0 ))"
+check "passes the desktop file name, spaces intact" "$(called 'DesktopReadme=HFM read me.txt')"
+sent=$(grep -o 'DesktopReadmeBase64=[A-Za-z0-9+/=]*' "$WORK/calls.log" | head -1 | cut -d= -f2-)
+check "the base64 sent decodes to the file byte for byte" \
+      "$([[ "$(print -rn -- "$sent" | base64 -d 2>/dev/null || print -rn -- "$sent" | base64 -D)" == "$(<"$WORK/desktop/HFM read me.txt")" ]] && print 1 || print 0)"
+
+run_pykx pykx; rc=$?
+check "FAILS when the guest does not confirm the desktop file" "$(( rc != 0 ))"
+check "says which desktop file is missing" "$([[ "$out" == *"desktop file 'HFM read me.txt'"* ]] && print 1 || print 0)"
+
+MOCK_README="HFM read me.txt" run_pykx pykx --dry-run
+check "dry-run shows the base64 length, not the base64" \
+      "$([[ "$out" == *"DesktopReadmeBase64=<"*" chars>"* && "$out" != *"$sent"* ]] && print 1 || print 0)"
+
+MOCK_CHECK=skipped run_pykx pykx --remove
+check "--remove names the desktop file so the guest can delete it" "$(called 'DesktopReadme=HFM read me.txt')"
+check "--remove does not send the contents" "$(( $(called 'DesktopReadmeBase64=') == 0 ))"
+unset MOCK_CHECK
+
+write_config 'PYKX_DESKTOP_README="desktop/missing.txt"'
+run_pykx pykx; rc=$?
+check "refuses a desktop file that does not exist" "$([[ $rc != 0 && "$out" == *"not found"* ]] && print 1 || print 0)"
+
+print -r -- "x" > "$WORK/desktop/notes.md"
+write_config 'PYKX_DESKTOP_README="desktop/notes.md"'
+run_pykx pykx; rc=$?
+check "refuses a desktop file that is not .txt" "$(( rc != 0 ))"
+write_config
+
 # ------------------------------------------------------------- config guards --
 write_config 'PYKX_VERSION="4.2.0; rm"'
 run_pykx pykx; rc=$?

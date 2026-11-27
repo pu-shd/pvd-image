@@ -21,14 +21,12 @@ run anything under `Program Files`, but cannot change it.
 | `tools\uv.exe` | [uv](https://github.com/astral-sh/uv), downloaded from its GitHub release and checked against `PYKX_UV_SHA256`. Used only to build the environment, and not on `PATH` |
 | `python\` | The CPython build uv downloads for `PYKX_PYTHON_VERSION` |
 | `venv\` | A virtual environment with `pykx==PYKX_VERSION` and any `PYKX_EXTRA_PACKAGES`, compiled to bytecode at install time, because users cannot write `__pycache__` there |
-| `bin\<prefix>-python.cmd` | Runs that environment's Python. `bin` goes on the machine `PATH` |
+| `bin\<prefix>-python.cmd` | Runs that environment's Python, licensed or not (below). `bin` goes on the machine `PATH` |
 | `bin\<prefix>-test.cmd` | Queries `PYKX_CHECK_HOST:PYKX_CHECK_PORT` and prints `tables[]`. Only written when a check host is set |
+| `<Public Desktop>\<name>.txt` | `PYKX_DESKTOP_README`, if set: your notes for users |
 
-Machine-wide settings:
+Also on the machine:
 
-- `PYKX_UNLICENSED=true`. PyKX runs in unlicensed mode, which sends queries to
-  a q server over IPC. It cannot run q locally, and it needs no kdb licence.
-  **Never put a kdb licence file on an image.**
 - The Visual C++ 2010 x64 runtime (`msvcr100.dll`), which PyKX loads on
   Windows. It is installed only if missing, from Microsoft's download, checked
   against a SHA-256 in the script. Microsoft's AVD marketplace images already
@@ -39,6 +37,34 @@ and uses a temporary cache that is deleted afterwards. The environment is built
 with `uv venv --python X.Y --python-preference only-managed`, which downloads a
 Python on demand. That avoids `uv python install`, which also adds `PATH` shims
 and registry entries.
+
+## Licensed or unlicensed, per user
+
+Each time `<prefix>-python` (or `<prefix>-test`) starts, it looks for a kdb
+licence belonging to the user, in this order:
+
+1. `QLIC`, if the user has set it
+2. `kc.lic` or `k4.lic` in `%OneDrive%\<PYKX_LICENSE_FOLDER>` (personal OneDrive)
+3. the same in `%OneDriveCommercial%\<PYKX_LICENSE_FOLDER>` (work or school OneDrive)
+4. the same in `%USERPROFILE%\<PYKX_LICENSE_FOLDER>`
+
+If it finds one, it sets `QLIC` to that folder and PyKX runs licensed, with q
+inside the Python process. Otherwise it sets `PYKX_UNLICENSED=true`, and PyKX
+sends queries to a q server over IPC, cannot run q locally, and needs no
+licence. Both settings apply to that run only (`setlocal`), and nothing is set
+machine-wide. A machine-wide `PYKX_UNLICENSED`, which earlier versions of this
+step set, would stop a user's own licence from working, so the step removes it.
+
+OneDrive is the suggested place on pooled hosts, which may not keep profiles
+between sessions. Whether a user may use a given licence on shared
+infrastructure is a question for its terms, not for this tooling. **Never put
+a kdb licence on an image.** The step checks both cases on the image VM:
+
+- With no licence present, `<prefix>-python` must start PyKX unlicensed. If
+  it starts licensed, a licence file is reachable from the VM and the run fails.
+- With an empty stand-in `kc.lic` in a temporary `%USERPROFILE%\<folder>`,
+  `<prefix>-python` must set `QLIC` to that folder and leave unlicensed mode
+  off. The check imports only `os`, so the empty file is never read.
 
 ## Pinning
 
@@ -64,6 +90,15 @@ and **a failed query fails the run**. An image whose users cannot reach their
 server is not finished, and the usual cause is a firewall on the server side
 that does not allow the image VM's outbound address. Fix that, or run with
 `--skip-check` and test from a session host later.
+
+## A desktop file for users
+
+`PYKX_DESKTOP_README` names a text file in your config repo. `pykx.sh` sends it
+base64-encoded, so quotes and backticks in example queries survive run-command
+parameter passing. The guest writes it to the Public Desktop with Windows line
+endings, reads it back, and reports its name; the driver fails if that name is
+missing. `--remove` deletes it. The file holds whatever suits the course:
+the commands, an example query, where a licence goes.
 
 ## What users run
 

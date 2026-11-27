@@ -46,9 +46,10 @@ WORKDIR /work
 COPY . /work
 
 RUN chmod +x /work/run-tests.sh /work/deploy.sh /work/update.sh /work/teardown.sh \
-             /work/repair.sh /work/shortcuts.sh /work/common.sh \
+             /work/repair.sh /work/shortcuts.sh /work/pykx.sh /work/common.sh \
              /work/tests/test_deploy.zsh /work/tests/test_repair.zsh \
              /work/tests/test_shortcuts.zsh /work/tests/test_teardown.zsh \
+             /work/tests/test_pykx.zsh \
              /work/tests/mocks/az
 
 ENTRYPOINT ["/work/run-tests.sh"]

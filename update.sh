@@ -27,7 +27,7 @@ while (( $# )); do
   shift
 done
 
-load_config
+load_config VS_EXPECTED_VERSION
 
 if [[ -n "$TARGET_VERSION" ]]; then
   [[ "$TARGET_VERSION" == <->.<->.<-> ]] || { die "--to expects a version like 18.11.0"; exit 2 }

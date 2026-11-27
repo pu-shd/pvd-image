@@ -4,21 +4,24 @@ Scripted, verifiable customisation of **Azure Virtual Desktop image VMs** from
 macOS or Linux — no VPN, no RDP session, and no network route to the image host
 required.
 
-Ships two ready-made image steps:
+Ships three ready-made image steps:
 
 - **Visual Studio Community** with the C++ desktop workload, pinned to a version
   and build you choose
 - **All-users desktop shortcuts** (e.g. an Excel icon for every user)
+- **A PyKX query client** for every user: pinned Python and PyKX in a folder
+  users can read but not change, so they can query a kdb+/q server without a
+  licence or admin rights
 
 Everything runs through **Azure `run-command`**, which reaches the VM over the
 Azure control plane and the guest agent. Nothing here needs the image host to be
 reachable on the network, which is what makes it usable against AVD session
 hosts on private addresses inside vnets you may not administer.
 
-> **Status:** used in anger against a Nerdio-managed AVD image, but the two
+> **Status:** used in anger against a Nerdio-managed AVD image, but the three
 > image steps are the only ones implemented so far. The framework around them
-> (dispatch → poll → verify → report) is the reusable part; adding a third step
-> means a guest script plus a driver, both modelled on the existing pair.
+> (dispatch → poll → verify → report) is the reusable part; adding another step
+> means a guest script plus a driver, both modelled on the existing ones.
 
 ## Why run-command rather than a tunnel
 
@@ -66,6 +69,7 @@ $EDITOR config.env          # subscription, resource group, VM name
 az login
 ./deploy.sh --start         # install Visual Studio, verify it
 ./shortcuts.sh              # place the all-users desktop shortcuts
+./pykx.sh                   # or: the PyKX client (an image needs only the steps it uses)
 ```
 
 `config.env` is git-ignored; it holds your identifiers. The scripts refuse to run
@@ -123,11 +127,13 @@ below still applies, and map commands explicitly rather than interpolating
 | `update.sh` | Move the pin to a newer Stable release (`--to 18.11.0`) and re-run |
 | `repair.sh` | Uninstall a Visual Studio instance by path (recovery) |
 | `shortcuts.sh` | All-users desktop shortcuts (`--remove` to undo) |
-| `teardown.sh` | Delete the run-command resource, optionally deallocate the VM |
+| `pykx.sh` | PyKX query client for all users (`--remove` to undo) |
+| `teardown.sh` | Delete the drivers' run-command resources, optionally deallocate the VM |
 | `common.sh` | Shared config loading, Azure preflight, power/agent helpers |
 | `scripts/Install-VisualStudio.ps1` | Guest side: idempotent, self-verifying install |
 | `scripts/Uninstall-VisualStudio.ps1` | Guest side: uninstall by path, verified |
 | `scripts/Set-PublicDesktopShortcuts.ps1` | Guest side: shortcut placement, verified |
+| `scripts/Install-PyKXClient.ps1` | Guest side: Python and PyKX for all users, verified |
 | `tools/scrub-check.sh` | Fails if any environment identifier is committed |
 | `tests/` | Pester suites (guest logic) and zsh suites (drivers, mocked `az`) |
 | `Dockerfile`, `docker-compose.yml` | Containerised test run |
@@ -141,6 +147,7 @@ changes nothing. Use it first.
 |---|---|
 | [docs/visual-studio.md](docs/visual-studio.md) | Version pinning (and why Community cannot truly be pinned), workload selection, repair |
 | [docs/shortcuts.md](docs/shortcuts.md) | All-users desktop shortcuts, why Public Desktop, adding more apps |
+| [docs/pykx.md](docs/pykx.md) | The PyKX query client: what it installs, pinning, the check, what users run |
 | [docs/cost-and-cleanup.md](docs/cost-and-cleanup.md) | Run-command reuse and limits, what actually costs money, measured figures |
 | [docs/access.md](docs/access.md) | Proving which access routes exist in your environment; required permissions |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Every failure mode hit in practice, with diagnosis and fix |
@@ -169,9 +176,9 @@ docker-compose build
 docker-compose run --rm tests
 ```
 
-**191 tests** across five suites, requiring no Azure subscription and no Windows
-host: 102 Pester tests over the guest decision logic (external edges mocked),
-plus 89 zsh tests driving each shell entry point against a mock `az` in
+**293 tests** across six suites, requiring no Azure subscription and no Windows
+host: 157 Pester tests over the guest decision logic (external edges mocked),
+plus 136 zsh tests driving each shell entry point against a mock `az` in
 `tests/mocks/az`.
 The runner fails if any suite fails, and also if a suite reports zero tests or no
 summary line — an empty run must not look green.
@@ -239,7 +246,7 @@ trying to keep out. Genuine false positives (a vendor product GUID, say) go in
 
 ## Not yet done
 
-- Only Visual Studio and desktop shortcuts are implemented. Other image steps
+- Only Visual Studio, desktop shortcuts and the PyKX client are implemented. Other image steps
   (runtimes, agents, registry policy) would follow the same guest-script +
   driver + tests pattern.
 - Visual Studio's own auto-update is left at its default. Freezing it on a golden

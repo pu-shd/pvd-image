@@ -10,8 +10,11 @@ log()  { print -r -- "$(date -u +%Y-%m-%dT%H:%M:%SZ) [INFO]  $*" }
 warn() { print -r -- "$(date -u +%Y-%m-%dT%H:%M:%SZ) [WARN]  $*" >&2 }
 die()  { print -r -- "$(date -u +%Y-%m-%dT%H:%M:%SZ) [ERROR] $*" >&2; return 1 }
 
+# load_config [VAR...]: every driver needs the target VM; a driver names any
+# further settings it cannot run without (deploy.sh: VS_EXPECTED_VERSION).
 load_config() {
   local cfg="${AVD_CONFIG:-$SCRIPT_DIR/config.env}"
+  local -a required=( AVD_SUBSCRIPTION_ID AVD_RESOURCE_GROUP AVD_VM_NAME "$@" )
   if [[ ! -f "$cfg" ]]; then
     die "config not found: $cfg
   Create it from the template and fill in your own values:
@@ -21,13 +24,13 @@ load_config() {
   set -a; source "$cfg"; set +a
 
   local v
-  for v in AVD_SUBSCRIPTION_ID AVD_RESOURCE_GROUP AVD_VM_NAME VS_EXPECTED_VERSION; do
+  for v in "${required[@]}"; do
     [[ -n "${(P)v:-}" ]] || { die "config is missing $v (see config.env.example)"; return 1 }
   done
 
   # A copied-but-unedited template is a common first-run mistake, and the error
   # from Azure would otherwise be an opaque "resource not found".
-  for v in AVD_SUBSCRIPTION_ID AVD_RESOURCE_GROUP AVD_VM_NAME VS_EXPECTED_VERSION; do
+  for v in "${required[@]}"; do
     if [[ "${(P)v}" == REPLACE_WITH_* ]]; then
       die "$v is still the placeholder from config.env.example - set it to your own value in $cfg"
       return 1
@@ -61,4 +64,10 @@ wait_for_agent() {
     sleep 15
   done
   die "guest agent did not become ready in time"
+}
+
+# Every run-command resource the drivers create, for teardown.sh.
+# AVD_RUNCMD_NAME is deploy.sh's, configurable; the others are fixed.
+tooling_runcmd_names() {
+  print -r -- "${AVD_RUNCMD_NAME:-install-vs-cpp}" set-desktop-shortcuts install-pykx-client
 }

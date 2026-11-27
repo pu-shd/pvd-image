@@ -10,10 +10,21 @@ set -uo pipefail
 args="$*"
 scenario="${MOCK_SCENARIO:-success}"
 
+# The value of --name in this invocation.
+runcmd_name() {
+  local prev=""
+  for a in "$@" ${args}; do
+    [[ "$prev" == "--name" ]] && { printf '%s' "$a"; return; }
+    prev="$a"
+  done
+}
+
 # The guest's stdout for the current scenario, as the guest would emit it.
 guest_output() {
   case "$scenario" in
     silent)    printf '' ;;
+    pykx)      printf '2026-01-01T00:00:00Z [INFO] Verified PyKX\nAVD_STATUS=success\nAVD_PYKX_VERSION=%s\nAVD_PYTHON_VERSION=%s\nAVD_UV_VERSION=0.8.0\nAVD_CHECK=%s\nAVD_REASON=installed and verified\n' "${MOCK_PYKX_VERSION:-4.2.0}" "${MOCK_PYTHON_VERSION:-3.12.11}" "${MOCK_CHECK:-ok}" ;;
+    pykxfail)  printf 'AVD_STATUS=failed\nAVD_PYKX_VERSION=\nAVD_PYTHON_VERSION=\nAVD_UV_VERSION=\nAVD_CHECK=\nAVD_REASON=installed, but querying the check host failed\n' ;;
     shortcuts) printf 'AVD_SHORTCUT_OK=Excel\nAVD_STATUS=success\nAVD_SHORTCUT_COUNT=%s\nAVD_REASON=create completed\n' "${MOCK_SHORTCUT_COUNT:-1}" ;;
     guestfail) printf 'AVD_STATUS=failed\nAVD_VERSION=\nAVD_BUILD=\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installer failed with exit code 1618\n' ;;
     drift)     printf 'AVD_STATUS=success\nAVD_VERSION=18.11.0\nAVD_BUILD=18.11.12300.1\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installed and verified\n' ;;
@@ -91,10 +102,16 @@ case "$args" in
     else
       # Existence probe. MOCK_DELETE_NOOP simulates a delete that silently does
       # not take effect, so the post-delete verification can be exercised.
+      # MOCK_STALE_RUNCMD=1: every name exists, or only those listed in
+      # MOCK_RUNCMD_NAMES. Deletes are recorded per name.
       if [[ "${MOCK_STALE_RUNCMD:-0}" == "1" ]]; then
-        deleted=0
-        [[ -n "${MOCK_CALL_LOG:-}" && -f "${MOCK_CALL_LOG}.deleted" ]] && deleted=1
-        if [[ "$deleted" == "1" && "${MOCK_DELETE_NOOP:-0}" != "1" ]]; then
+        name="$(runcmd_name)"
+        if [[ -n "${MOCK_RUNCMD_NAMES:-}" && " ${MOCK_RUNCMD_NAMES} " != *" $name "* ]]; then
+          exit 1
+        fi
+        if [[ -n "${MOCK_CALL_LOG:-}" && -f "${MOCK_CALL_LOG}.deleted" ]] \
+           && grep -qxF -- "$name" "${MOCK_CALL_LOG}.deleted" \
+           && [[ "${MOCK_DELETE_NOOP:-0}" != "1" ]]; then
           exit 1   # gone, as a real delete would leave it
         fi
         exit 0
@@ -108,7 +125,7 @@ case "$args" in
     # Record the delete so a later existence probe reflects it.
     [[ -n "${MOCK_CALL_LOG:-}" ]] && export MOCK_DELETED=1
     if [[ -n "${MOCK_CALL_LOG:-}" ]]; then
-      printf '1' > "${MOCK_CALL_LOG}.deleted"
+      printf '%s\n' "$(runcmd_name)" >> "${MOCK_CALL_LOG}.deleted"
     fi
     ;;
 

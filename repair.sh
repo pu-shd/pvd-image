@@ -30,7 +30,7 @@ done
 
 [[ -n "$TARGET_PATH" ]] || { die "--path is required (e.g. --path 'C:\\Program')"; exit 2 }
 
-load_config
+load_config VS_EXPECTED_VERSION
 require_az
 
 PS_SCRIPT="$SCRIPT_DIR/scripts/Uninstall-VisualStudio.ps1"

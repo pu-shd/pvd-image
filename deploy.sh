@@ -31,7 +31,7 @@ while (( $# )); do
   shift
 done
 
-load_config
+load_config VS_EXPECTED_VERSION
 require_az
 
 : "${AVD_RUNCMD_NAME:=install-vs-cpp}"

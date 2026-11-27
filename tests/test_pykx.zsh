@@ -137,6 +137,18 @@ check "--start --dry-run says it would start the VM" "$([[ "$out" == *"would sta
 check "--dry-run starts nothing" "$(( $(called '^vm start') == 0 ))"
 
 # ------------------------------------------------------------------ dry run ---
+run_pykx deallocated --dry-run; rc=$?
+check "dry-run on a stopped VM succeeds and says a real run needs it running" \
+      "$([[ $rc == 0 && "$out" == *"a real run needs it running"* ]] && print 1 || print 0)"
+
+write_config 'PYKX_CHECK_HOST=""' 'PYKX_CHECK_PORT=""'
+run_pykx pykx --dry-run
+check "logs 'check: none' with no check host" "$([[ "$out" == *"check: none"* ]] && print 1 || print 0)"
+write_config
+run_pykx pykx --dry-run
+check "logs the check host once, with its port" \
+      "$([[ "$out" == *"check: q.example.invalid:6005"$'\n'* ]] && print 1 || print 0)"
+
 run_pykx pykx --dry-run; rc=$?
 check "dry-run exits cleanly" "$(( rc == 0 ))"
 check "dry-run creates no run-command" "$(( $(called '^vm run-command create') == 0 ))"

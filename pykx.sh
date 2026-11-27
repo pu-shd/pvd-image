@@ -86,7 +86,7 @@ log "target: $AVD_VM_NAME ($AVD_RESOURCE_GROUP)"
 log "mode: $MODE, into $PYKX_INSTALL_PATH"
 if [[ "$MODE" == install ]]; then
   log "PyKX $PYKX_VERSION, Python $PYKX_PYTHON_VERSION, uv $PYKX_UV_VERSION${PYKX_EXTRA_PACKAGES:+, plus $PYKX_EXTRA_PACKAGES}"
-  log "check: ${PYKX_CHECK_HOST:+$PYKX_CHECK_HOST:$PYKX_CHECK_PORT}${PYKX_CHECK_HOST:-none}"
+  if [[ -n "$PYKX_CHECK_HOST" ]]; then log "check: $PYKX_CHECK_HOST:$PYKX_CHECK_PORT"; else log "check: none"; fi
 fi
 
 # ------------------------------------------------------------ power state ---
@@ -101,6 +101,8 @@ if [[ "$power" != *running* ]]; then
       az vm start -g "$AVD_RESOURCE_GROUP" -n "$AVD_VM_NAME" --subscription "$AVD_SUBSCRIPTION_ID" -o none
       wait_for_agent 420
     fi
+  elif (( DRY_RUN )); then
+    warn "[dry-run] VM is '${power:-unknown}'; a real run needs it running (start it from Nerdio, or pass --start)"
   else
     die "VM is '${power:-unknown}'. Start it from Nerdio (preferred) or pass --start."
     exit 1

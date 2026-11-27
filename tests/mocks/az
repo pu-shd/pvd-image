@@ -71,7 +71,9 @@ case "$args" in
 
   "vm get-instance-view"*)
     if [[ "$args" == *vmAgent* ]]; then
-      echo "Ready"
+      # As real JMESPath: piping a scalar into [0] yields null, which tsv
+      # prints as an empty line. Only an array can be indexed.
+      if [[ "$args" == *"displayStatus | [0]"* ]]; then echo ""; else echo "Ready"; fi
     elif [[ "$args" == *PowerState* ]]; then
       case "$scenario" in
         deallocated|start_then_run) echo "${MOCK_POWER_STATE:-VM deallocated}" ;;

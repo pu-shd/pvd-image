@@ -240,10 +240,20 @@ function Get-WrapperContent {
     $w = [ordered]@{}
     $w["$Prefix-python.cmd"] = ($lines -join "`r`n") + "`r`n"
     if ($HostName) {
-        $code = "import pykx as kx; q = kx.SyncQConnection('$HostName', $Port, timeout=10); print(q('tables[]')); q.close()"
+        # .py(): unlicensed PyKX cannot format q values, so printing the raw
+        # result shows pykx.SymbolVector._from_addr(...), not the names.
+        $code = "import pykx as kx; q = kx.SyncQConnection('$HostName', $Port, timeout=10); print(' '.join(q('tables[]').py())); q.close()"
         $w["$Prefix-test.cmd"] = "@call `"%~dp0$Prefix-python.cmd`" -c `"$code`"`r`n"
     }
     return $w
+}
+
+# What <prefix>-test should print: table names separated by spaces. Not
+# empty, and not an unconverted PyKX object such as
+# pykx.SymbolVector._from_addr(0x...).
+function Test-TablesAnswer {
+    param([AllowEmptyString()][string]$Text)
+    return [bool]($Text -match '^[A-Za-z_][A-Za-z0-9_]*( [A-Za-z_][A-Za-z0-9_]*)*$')
 }
 
 # PATH editing, as pure string functions over the ';'-separated value.
@@ -486,14 +496,16 @@ function Invoke-Main {
         $realHome = $env:USERPROFILE
         try {
             [Environment]::SetEnvironmentVariable('USERPROFILE', $fakeHome, 'Process')
-            $code = "print(__import__('os').environ.get('QLIC'),__import__('os').environ.get('PYKX_UNLICENSED'),sep='|')"
+            # No cmd metacharacters (& | < > ^ %): this passes through cmd /c
+            # unquoted, where '|' would start a pipe.
+            $code = "print(__import__('os').environ.get('QLIC'),__import__('os').environ.get('PYKX_UNLICENSED'),sep='+')"
             $r = Invoke-Native -File $cmd -Arguments @('/c', $pyCmd, '-c', $code)
         } finally {
             [Environment]::SetEnvironmentVariable('USERPROFILE', $realHome, 'Process')
         }
         $seen = (($r.Text -split "`n")[-1]).Trim()
-        if ($r.Code -ne 0 -or $seen -ne "$fakeDir|None") {
-            throw "$Prefix-python did not pick up a licence in %USERPROFILE%\$LicenseDir (saw '$seen', expected '$fakeDir|None')"
+        if ($r.Code -ne 0 -or $seen -ne "$fakeDir+None") {
+            throw "$Prefix-python did not pick up a licence in %USERPROFILE%\$LicenseDir (saw '$seen', expected '$fakeDir+None')"
         }
         Write-Log "$Prefix-python finds a user's licence in %USERPROFILE%\$LicenseDir and runs licensed"
 
@@ -513,6 +525,10 @@ function Invoke-Main {
             foreach ($l in $r.Text -split "`n") { Write-Log "  $l" }
             if ($r.Code -ne 0) {
                 throw "installed, but querying ${HostName}:$Port failed (exit $($r.Code)); is this VM's network allowed by the server's firewall?"
+            }
+            $answer = (($r.Text -split "`n")[-1]).Trim()
+            if (-not (Test-TablesAnswer -Text $answer)) {
+                throw "$Prefix-test ran, but printed '$answer' rather than table names"
             }
             $check = 'ok'
             Write-Log "Queried ${HostName}:$Port"

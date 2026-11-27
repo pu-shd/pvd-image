@@ -58,7 +58,7 @@ wait_for_agent() {
   while (( $(date +%s) < deadline )); do
     state=$(az vm get-instance-view -g "$AVD_RESOURCE_GROUP" -n "$AVD_VM_NAME" \
               --subscription "$AVD_SUBSCRIPTION_ID" \
-              --query "instanceView.vmAgent.statuses[0].displayStatus | [0]" -o tsv 2>/dev/null || true)
+              --query "instanceView.vmAgent.statuses[0].displayStatus" -o tsv 2>/dev/null || true)
     [[ "$state" == *Ready* ]] && { log "guest agent ready"; return 0 }
     log "waiting for guest agent (currently: ${state:-unknown})"
     sleep 15

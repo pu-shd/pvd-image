@@ -8,7 +8,7 @@
 #
 # --start       start the VM if it is deallocated
 # --skip-check  do not query PYKX_CHECK_HOST:PYKX_CHECK_PORT after installing
-# --remove      remove the client, its PATH entry and PYKX_UNLICENSED
+# --remove      remove the client, its PATH entry and the desktop file
 # --dry-run     print what would run, change nothing
 #
 # Versions come from config.env (PYKX_*). Exits non-zero unless the guest
@@ -46,6 +46,8 @@ require_az
 : "${PYKX_EXTRA_PACKAGES:=}"
 : "${PYKX_CHECK_HOST:=}"
 : "${PYKX_CHECK_PORT:=}"
+: "${PYKX_LICENSE_FOLDER:=kx}"
+: "${PYKX_DESKTOP_README:=}"
 : "${AVD_POLL_INTERVAL_SECONDS:=15}"
 (( SKIP_CHECK )) && PYKX_CHECK_HOST="" PYKX_CHECK_PORT=""
 
@@ -57,11 +59,29 @@ if [[ "$MODE" == install ]]; then
   [[ "$PYKX_UV_VERSION" =~ '^[0-9]+\.[0-9]+\.[0-9]+$' ]]    || { die "PYKX_UV_VERSION '$PYKX_UV_VERSION' is not a version like 0.8.0"; exit 2 }
   [[ "$PYKX_UV_SHA256" =~ '^[0-9a-fA-F]{64}$' ]]            || { die "PYKX_UV_SHA256 is not a 64-character hex SHA-256"; exit 2 }
   [[ "$PYKX_COMMAND_PREFIX" =~ '^[A-Za-z][A-Za-z0-9_-]{0,31}$' ]] || { die "PYKX_COMMAND_PREFIX '$PYKX_COMMAND_PREFIX' must be letters, digits, '-' or '_'"; exit 2 }
+  [[ "$PYKX_LICENSE_FOLDER" =~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' && "$PYKX_LICENSE_FOLDER" != *..* ]] \
+    || { die "PYKX_LICENSE_FOLDER '$PYKX_LICENSE_FOLDER' must be one folder name"; exit 2 }
   if [[ -n "$PYKX_CHECK_HOST" || -n "$PYKX_CHECK_PORT" ]]; then
     [[ "$PYKX_CHECK_HOST" =~ '^[A-Za-z0-9]([A-Za-z0-9.-]{0,252})$' ]] || { die "PYKX_CHECK_HOST '$PYKX_CHECK_HOST' is not a host name"; exit 2 }
     [[ "$PYKX_CHECK_PORT" =~ '^[0-9]{1,5}$' ]] && (( PYKX_CHECK_PORT >= 1 && PYKX_CHECK_PORT <= 65535 )) \
       || { die "PYKX_CHECK_PORT '$PYKX_CHECK_PORT' is not a port number"; exit 2 }
   fi
+fi
+
+# The desktop text file: a path in the config repo, relative to config.env.
+# Sent as base64, so quotes and backticks in its examples survive run-command
+# parameter passing.
+readme_name="" readme_b64=""
+if [[ -n "$PYKX_DESKTOP_README" ]]; then
+  cfg_dir="${${AVD_CONFIG:-$SCRIPT_DIR/config.env}:A:h}"
+  readme_path="$PYKX_DESKTOP_README"
+  [[ "$readme_path" == /* ]] || readme_path="$cfg_dir/$readme_path"
+  [[ -f "$readme_path" ]] || { die "PYKX_DESKTOP_README not found: $readme_path"; exit 2 }
+  readme_name="${readme_path:t}"
+  [[ "$readme_name" =~ '^[A-Za-z0-9][A-Za-z0-9 ._()-]{0,79}\.txt$' ]] \
+    || { die "desktop file name '$readme_name' must be a plain .txt name"; exit 2 }
+  (( $(wc -c < "$readme_path") <= 65536 )) || { die "$readme_path is larger than 64 KB"; exit 2 }
+  readme_b64="$(base64 < "$readme_path" | tr -d '\n')"
 fi
 
 PS_SCRIPT="$SCRIPT_DIR/scripts/Install-PyKXClient.ps1"
@@ -72,12 +92,14 @@ timeout_seconds=1800
 
 typeset -a runcmd_params
 runcmd_params=( "Action=$MODE" "InstallPath=$PYKX_INSTALL_PATH" )
+[[ -n "$readme_name" ]] && runcmd_params+=( "DesktopReadme=$readme_name" )
 if [[ "$MODE" == install ]]; then
   runcmd_params+=(
     "PykxVersion=$PYKX_VERSION" "PythonVersion=$PYKX_PYTHON_VERSION"
     "UvVersion=$PYKX_UV_VERSION" "UvSha256=$PYKX_UV_SHA256"
-    "CommandPrefix=$PYKX_COMMAND_PREFIX"
+    "CommandPrefix=$PYKX_COMMAND_PREFIX" "LicenseFolder=$PYKX_LICENSE_FOLDER"
   )
+  [[ -n "$readme_b64" ]] && runcmd_params+=( "DesktopReadmeBase64=$readme_b64" )
   [[ -n "$PYKX_EXTRA_PACKAGES" ]] && runcmd_params+=( "ExtraPackages=$PYKX_EXTRA_PACKAGES" )
   [[ -n "$PYKX_CHECK_HOST" ]] && runcmd_params+=( "CheckHost=$PYKX_CHECK_HOST" "CheckPort=$PYKX_CHECK_PORT" )
 fi
@@ -87,6 +109,8 @@ log "mode: $MODE, into $PYKX_INSTALL_PATH"
 if [[ "$MODE" == install ]]; then
   log "PyKX $PYKX_VERSION, Python $PYKX_PYTHON_VERSION, uv $PYKX_UV_VERSION${PYKX_EXTRA_PACKAGES:+, plus $PYKX_EXTRA_PACKAGES}"
   if [[ -n "$PYKX_CHECK_HOST" ]]; then log "check: $PYKX_CHECK_HOST:$PYKX_CHECK_PORT"; else log "check: none"; fi
+  log "user licences: OneDrive\\$PYKX_LICENSE_FOLDER or %USERPROFILE%\\$PYKX_LICENSE_FOLDER"
+  log "desktop file: ${readme_name:-none}"
 fi
 
 # ------------------------------------------------------------ power state ---
@@ -111,7 +135,12 @@ fi
 
 if (( DRY_RUN )); then
   log "[dry-run] would create run-command '$runcmd_name' (timeout ${timeout_seconds}s)"
-  log "[dry-run] parameters: ${runcmd_params[*]}"
+  typeset -a shown=()
+  for p in "${runcmd_params[@]}"; do
+    [[ "$p" == DesktopReadmeBase64=* ]] && p="DesktopReadmeBase64=<${#readme_b64} chars>"
+    shown+=( "$p" )
+  done
+  log "[dry-run] parameters: ${shown[*]}"
   exit 0
 fi
 
@@ -182,6 +211,10 @@ if [[ "$got_python" != "$PYKX_PYTHON_VERSION" && "$got_python" != "$PYKX_PYTHON_
   die "guest reports Python '${got_python}' but config expects $PYKX_PYTHON_VERSION. See $logfile"
   exit 1
 fi
+if [[ -n "$readme_name" && "$(marker AVD_README)" != "$readme_name" ]]; then
+  die "asked for the desktop file '$readme_name', but the guest reports '$(marker AVD_README)'. See $logfile"
+  exit 1
+fi
 if [[ -n "$PYKX_CHECK_HOST" && "$got_check" != ok ]]; then
   die "a check against $PYKX_CHECK_HOST:$PYKX_CHECK_PORT was asked for, but the guest reports '${got_check}'. See $logfile"
   exit 1
@@ -192,4 +225,5 @@ if [[ "$got_check" == ok ]]; then
   log "queried $PYKX_CHECK_HOST:$PYKX_CHECK_PORT from the VM"
 fi
 log "users run: ${PYKX_COMMAND_PREFIX}-python${PYKX_CHECK_HOST:+, ${PYKX_COMMAND_PREFIX}-test}"
+[[ -n "$readme_name" ]] && log "desktop file: $readme_name"
 log "next: ./teardown.sh --deallocate while the VM is running, then seal in Nerdio"

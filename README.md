@@ -11,7 +11,7 @@ Ships three ready-made image steps:
 - **All-users desktop shortcuts** (e.g. an Excel icon for every user)
 - **A PyKX query client** for every user: pinned Python and PyKX in a folder
   users can read but not change, so they can query a kdb+/q server without a
-  licence or admin rights
+  licence or admin rights, or with their own licence from OneDrive
 
 Everything runs through **Azure `run-command`**, which reaches the VM over the
 Azure control plane and the guest agent. Nothing here needs the image host to be
@@ -176,9 +176,9 @@ docker-compose build
 docker-compose run --rm tests
 ```
 
-**293 tests** across six suites, requiring no Azure subscription and no Windows
-host: 157 Pester tests over the guest decision logic (external edges mocked),
-plus 136 zsh tests driving each shell entry point against a mock `az` in
+**329 tests** across six suites, requiring no Azure subscription and no Windows
+host: 181 Pester tests over the guest decision logic (external edges mocked),
+plus 148 zsh tests driving each shell entry point against a mock `az` in
 `tests/mocks/az`.
 The runner fails if any suite fails, and also if a suite reports zero tests or no
 summary line — an empty run must not look green.

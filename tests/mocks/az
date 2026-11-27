@@ -23,6 +23,8 @@ runcmd_name() {
 guest_output() {
   case "$scenario" in
     silent)    printf '' ;;
+    pykx)      printf '2026-01-01T00:00:00Z [INFO] Verified PyKX\nAVD_STATUS=success\nAVD_PYKX_VERSION=%s\nAVD_PYTHON_VERSION=%s\nAVD_UV_VERSION=0.8.0\nAVD_CHECK=%s\nAVD_REASON=installed and verified\n' "${MOCK_PYKX_VERSION:-4.2.0}" "${MOCK_PYTHON_VERSION:-3.12.11}" "${MOCK_CHECK:-ok}" ;;
+    pykxfail)  printf 'AVD_STATUS=failed\nAVD_PYKX_VERSION=\nAVD_PYTHON_VERSION=\nAVD_UV_VERSION=\nAVD_CHECK=\nAVD_REASON=installed, but querying the check host failed\n' ;;
     shortcuts) printf 'AVD_SHORTCUT_OK=Excel\nAVD_STATUS=success\nAVD_SHORTCUT_COUNT=%s\nAVD_REASON=create completed\n' "${MOCK_SHORTCUT_COUNT:-1}" ;;
     guestfail) printf 'AVD_STATUS=failed\nAVD_VERSION=\nAVD_BUILD=\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installer failed with exit code 1618\n' ;;
     drift)     printf 'AVD_STATUS=success\nAVD_VERSION=18.11.0\nAVD_BUILD=18.11.12300.1\nAVD_REBOOT_REQUIRED=false\nAVD_REASON=installed and verified\n' ;;

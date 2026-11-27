@@ -176,8 +176,8 @@ docker-compose build
 docker-compose run --rm tests
 ```
 
-**330 tests** across six suites, requiring no Azure subscription and no Windows
-host: 182 Pester tests over the guest decision logic (external edges mocked),
+**336 tests** across six suites, requiring no Azure subscription and no Windows
+host: 188 Pester tests over the guest decision logic (external edges mocked),
 plus 148 zsh tests driving each shell entry point against a mock `az` in
 `tests/mocks/az`.
 The runner fails if any suite fails, and also if a suite reports zero tests or no

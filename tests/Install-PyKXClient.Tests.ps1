@@ -185,11 +185,22 @@ Describe 'Get-WrapperContent' {
         $t = (Get-WrapperContent -Prefix 'hfm' -HostName 'q.example.invalid' -Port '6005')['hfm-test.cmd']
         $t | Should -BeLike '@call "%~dp0hfm-python.cmd" -c *'
         $t | Should -BeLike "*SyncQConnection('q.example.invalid', 6005, timeout=10)*"
+        $t | Should -Match ([regex]::Escape("' '.join(q('tables[]').py())"))
     }
     It 'uses CRLF line endings for cmd.exe' {
         $script:Py | Should -BeLike "*`r`n"
         $script:Py | Should -Not -Match "[^`r]`n"
     }
+}
+
+Describe 'Test-TablesAnswer' {
+    It 'accepts table names' { Test-TablesAnswer -Text 'instinfo quote trade' | Should -BeTrue }
+    It 'accepts one table'   { Test-TablesAnswer -Text 'trade' | Should -BeTrue }
+    It 'refuses an unconverted PyKX object, as seen on a real guest' {
+        Test-TablesAnswer -Text 'pykx.SymbolVector._from_addr(0x29f00800a00)' | Should -BeFalse
+    }
+    It 'refuses nothing at all' { Test-TablesAnswer -Text '' | Should -BeFalse }
+    It 'refuses an error message' { Test-TablesAnswer -Text "QError: 'access" | Should -BeFalse }
 }
 
 Describe 'PATH editing' {
@@ -230,6 +241,7 @@ Describe 'Invoke-Main' {
         $script:CheckExit = 0
         $script:LicensedText = 'False'
         $script:WrapperFindsLicence = $true
+        $script:TestText = 'instinfo quote trade'
         $script:Desktop = Join-Path ([IO.Path]::GetTempPath()) "pykx-desk-$(Get-Random)"
         [void][IO.Directory]::CreateDirectory($script:Desktop)
         Mock Get-PublicDesktop { $script:Desktop }
@@ -262,7 +274,7 @@ Describe 'Invoke-Main' {
                 $q = if ($script:WrapperFindsLicence) { [IO.Path]::Combine($env:USERPROFILE, 'kx') } else { 'None' }
                 return [pscustomobject]@{ Code = 0; Text = "$q+None" }
             }
-            if ($Arguments -contains '/c') { return [pscustomobject]@{ Code = $script:CheckExit; Text = 'instinfo quote trade' } }
+            if ($Arguments -contains '/c') { return [pscustomobject]@{ Code = $script:CheckExit; Text = $script:TestText } }
             $script:UvCalls += ,@($Arguments)
             return [pscustomobject]@{ Code = 0; Text = '' }
         }
@@ -371,6 +383,12 @@ Describe 'Invoke-Main' {
         $script:CheckExit = 1
         Invoke-Main @script:MainArgs | Should -Be 1
         Should -Invoke Out-Line -ParameterFilter { $Text -like 'AVD_REASON=*firewall*' }
+    }
+    It 'FAILS when PREFIX-test prints an unconverted PyKX object' {
+        $script:MainArgs.HostName = 'q.example.invalid'; $script:MainArgs.Port = '6005'
+        $script:TestText = 'pykx.SymbolVector._from_addr(0x29f00800a00)'
+        Invoke-Main @script:MainArgs | Should -Be 1
+        Should -Invoke Out-Line -ParameterFilter { $Text -like 'AVD_REASON=*rather than table names*' }
     }
     It 'FAILS on bad input before downloading anything' {
         $script:MainArgs.UvHash = 'abc'

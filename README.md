@@ -148,6 +148,7 @@ changes nothing. Use it first.
 | [docs/visual-studio.md](docs/visual-studio.md) | Version pinning (and why Community cannot truly be pinned), workload selection, repair |
 | [docs/shortcuts.md](docs/shortcuts.md) | All-users desktop shortcuts, why Public Desktop, adding more apps |
 | [docs/pykx.md](docs/pykx.md) | The PyKX query client: what it installs, pinning, the check, what users run |
+| [docs/host-pools.md](docs/host-pools.md) | After the image: clone pools from an empty template pool, single sign-on RDP properties, Start VM on Connect, checks from Azure |
 | [docs/cost-and-cleanup.md](docs/cost-and-cleanup.md) | Run-command reuse and limits, what actually costs money, measured figures |
 | [docs/access.md](docs/access.md) | Proving which access routes exist in your environment; required permissions |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Every failure mode hit in practice, with diagnosis and fix |
@@ -214,6 +215,8 @@ and OOMs under emulation on Apple silicon.
    the image lifecycle) rather than with raw `az`, so its state stays consistent.
    For the same reason, prefer starting and stopping the VM there;
    `deploy.sh --start` exists for when that is inconvenient.
+5. **Create the host pool by cloning an empty template pool**, not by
+   entering settings by hand. See [docs/host-pools.md](docs/host-pools.md).
 
 Run-command resources are child resources of the VM, not disk content: they
 survive stopping and deallocating, and are **not** carried into a captured image.
